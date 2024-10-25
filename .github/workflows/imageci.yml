@@ -75,11 +75,20 @@ jobs:
           driver-opts: |
             image=moby/buildkit:v0.10.6
 
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
+      - name: Login to Github Container Registry
+        uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ !env.ACT }}
+
+      - name: Login to Github Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         if: ${{ !env.ACT }}
 
       - uses: docker/build-push-action@v4
@@ -91,9 +100,9 @@ jobs:
             OS_RELEASE=${{ matrix.php_os_release }}
             ENV_SOURCE_IMAGE=php
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
-          tags: docker.io/disrex/gitlab-ci:${{ matrix.php_version }}
-          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci:${{ matrix.php_version }}-buildcache
-          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci:${{ matrix.php_version }}-buildcache,mode=max
+          tags: ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php_version }},docker.io/disrex/gitlab-ci:${{ matrix.php_version }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php_version }}-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php_version }}-buildcache,mode=max
 
       - uses: docker/build-push-action@v4
         if: ${{ matrix.latest }}
@@ -105,9 +114,9 @@ jobs:
             OS_RELEASE=${{ matrix.php_os_release }}
             ENV_SOURCE_IMAGE=php
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
-          tags: docker.io/disrex/gitlab-ci:latest
-          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci:latest-buildcache
-          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci:latest-buildcache,mode=max
+          tags: ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest,docker.io/disrex/gitlab-ci:latest
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest-buildcache,mode=max
 
   php-node:
     name: PHP-CLI ${{ matrix.php_version }} + Node ${{ matrix.node_version }}
@@ -125,6 +134,15 @@ jobs:
         with:
           driver-opts: |
             image=moby/buildkit:v0.10.6
+
+      - name: Login to Github Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ !env.ACT }}
+
       - name: Login to DockerHub
         uses: docker/login-action@v3
         with:
@@ -142,9 +160,9 @@ jobs:
             NODE_VERSION=${{ matrix.node_version }}
             OS_RELEASE=${{ matrix.node_os_release }}
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
-          tags: docker.io/disrex/gitlab-ci:${{ matrix.php_version }}-node${{ matrix.node_version }}
-          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache
-          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache,mode=max
+          tags: ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php_version }}-node${{ matrix.node_version }},docker.io/disrex/gitlab-ci:${{ matrix.php_version }}-node${{ matrix.node_version }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache,mode=max
 
       - uses: docker/build-push-action@v4
         if: ${{ matrix.latest }}
@@ -157,9 +175,9 @@ jobs:
             NODE_VERSION=${{ matrix.node_version }}
             OS_RELEASE=${{ matrix.node_os_release }}
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
-          tags: docker.io/disrex/gitlab-ci:latest-nodelatest
-          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci:latest-nodelatest-buildcache
-          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci:latest-nodelatest-buildcache,mode=max
+          tags: ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest-nodelatest,docker.io/disrex/gitlab-ci:latest-nodelatest
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest-nodelatest-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest-nodelatest-buildcache,mode=max
 
   composer1:
     name: PHP-CLI + Composer1 ${{ matrix.php_version }} - Node ${{ matrix.node_version }}
@@ -178,6 +196,14 @@ jobs:
           driver-opts: |
             image=moby/buildkit:v0.10.6
 
+      - name: Login to Github Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ !env.ACT }}
+
       - name: Login to DockerHub
         uses: docker/login-action@v3
         with:
@@ -194,9 +220,9 @@ jobs:
             ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
             PHP_VERSION=${{ matrix.php_version }}-node${{ matrix.node_version }}
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
-          tags: docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}
-          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache
-          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache,mode=max
+          tags: ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }},docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache,mode=max
 
       - uses: docker/build-push-action@v4
         if: ${{ matrix.node_version=='x' }}
@@ -207,9 +233,9 @@ jobs:
             ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
             PHP_VERSION=${{ matrix.php_version }}
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
-          tags: docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}
-          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}-buildcache
-          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}-buildcache,mode=max
+          tags:  ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }},docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }}-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }}-buildcache,mode=max
 
       - uses: docker/build-push-action@v4
         if: ${{ matrix.node_version!='x' && matrix.latest }}
@@ -220,9 +246,9 @@ jobs:
             ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
             PHP_VERSION=${{ matrix.php_version }}-node${{ matrix.node_version }}
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
-          tags: docker.io/disrex/gitlab-ci-composer1:latest-nodelatest
-          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:latest-nodelatest-buildcache
-          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:latest-nodelatest-buildcache,mode=max
+          tags:  ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:latest-nodelatest,docker.io/disrex/gitlab-ci-composer1:latest-nodelatest
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:latest-nodelatest-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:latest-nodelatest-buildcache,mode=max
 
       - uses: docker/build-push-action@v4
         if: ${{ matrix.node_version=='x' && matrix.latest }}
@@ -233,6 +259,6 @@ jobs:
             ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
             PHP_VERSION=${{ matrix.php_version }}
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
-          tags: docker.io/disrex/gitlab-ci-composer1:latest
-          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:latest-buildcache
-          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:latest-buildcache,mode=max
+          tags:  ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:latest,docker.io/disrex/gitlab-ci-composer1:latest
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:latest-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:latest-buildcache,mode=max
