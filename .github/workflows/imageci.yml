@@ -1,0 +1,238 @@
+name: Gitlab CI PHP + Composer + Node + Yarn + NPM + Other
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 1 1 * *"   # 01 AM on first day of the month
+  pull_request:
+  push:
+    paths:
+      - .trigger
+      - node/Dockerfile
+      - composer1/Dockerfile
+      - Dockerfile
+      - .github/workflows/imageci.yml
+      - .github/workflows/php-matrix/*.php
+    branches:
+      - master
+
+jobs:
+  php-matrix:
+    name: Generate Base PHP Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.0
+      - id: matrix
+        run: |
+          php .github/workflows/php-matrix/php-generator.php >> $GITHUB_OUTPUT
+      - run: echo "Matrix:\n";echo '${{ steps.matrix.outputs.matrix }}'
+  node-matrix:
+    name: Generate Base PHP-Node Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.0
+      - id: matrix
+        run: |
+          php .github/workflows/php-matrix/node-generator.php >> $GITHUB_OUTPUT
+      - run: echo "Matrix:\n";echo '${{ steps.matrix.outputs.matrix }}'
+  full-matrix:
+    name: Generate Full Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.0
+      - id: matrix
+        run: |
+          php .github/workflows/php-matrix/full-generator.php >> $GITHUB_OUTPUT
+      - run: echo "Matrix:\n";echo '${{ steps.matrix.outputs.matrix }}'
+
+  php-cli:
+    needs: php-matrix
+    name: PHP-CLI ${{ matrix.php_version }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix: ${{fromJson(needs.php-matrix.outputs.matrix)}}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: docker/setup-qemu-action@v2
+      - uses: docker/setup-buildx-action@v2
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.10.6
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+        if: ${{ !env.ACT }}
+
+      - uses: docker/build-push-action@v4
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            PHP_VERSION=${{ matrix.php_version }}
+            OS_RELEASE=${{ matrix.php_os_release }}
+            ENV_SOURCE_IMAGE=php
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: docker.io/disrex/gitlab-ci:${{ matrix.php_version }}
+          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci:${{ matrix.php_version }}-buildcache
+          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci:${{ matrix.php_version }}-buildcache,mode=max
+
+      - uses: docker/build-push-action@v4
+        if: ${{ matrix.latest }}
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            PHP_VERSION=${{ matrix.php_version }}
+            OS_RELEASE=${{ matrix.php_os_release }}
+            ENV_SOURCE_IMAGE=php
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: docker.io/disrex/gitlab-ci:latest
+          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci:latest-buildcache
+          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci:latest-buildcache,mode=max
+
+  php-node:
+    name: PHP-CLI ${{ matrix.php_version }} + Node ${{ matrix.node_version }}
+    runs-on: ubuntu-latest
+    needs: [ php-cli, node-matrix ]
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ github.ref == 'refs/heads/master' && 6 || 0 }}
+      matrix: ${{fromJson(needs.node-matrix.outputs.matrix)}}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: docker/setup-qemu-action@v2
+      - uses: docker/setup-buildx-action@v2
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.10.6
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        if: ${{ !env.ACT }}
+
+      - uses: docker/build-push-action@v4
+        with:
+          context: node
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
+            PHP_VERSION=${{ matrix.php_version }}
+            NODE_VERSION=${{ matrix.node_version }}
+            OS_RELEASE=${{ matrix.node_os_release }}
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: docker.io/disrex/gitlab-ci:${{ matrix.php_version }}-node${{ matrix.node_version }}
+          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache
+          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache,mode=max
+
+      - uses: docker/build-push-action@v4
+        if: ${{ matrix.latest }}
+        with:
+          context: node
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
+            PHP_VERSION=${{ matrix.php_version }}
+            NODE_VERSION=${{ matrix.node_version }}
+            OS_RELEASE=${{ matrix.node_os_release }}
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: docker.io/disrex/gitlab-ci:latest-nodelatest
+          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci:latest-nodelatest-buildcache
+          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci:latest-nodelatest-buildcache,mode=max
+
+  composer1:
+    name: PHP-CLI + Composer1 ${{ matrix.php_version }} - Node ${{ matrix.node_version }}
+    runs-on: ubuntu-latest
+    needs: [ full-matrix, php-node ]
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ github.ref == 'refs/heads/master' && 2 || 0 }}
+      matrix: ${{fromJson(needs.full-matrix.outputs.matrix)}}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: docker/setup-qemu-action@v2
+      - uses: docker/setup-buildx-action@v2
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.10.6
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        if: ${{ !env.ACT }}
+
+      - uses: docker/build-push-action@v4
+        if: ${{ matrix.node_version!='x' }}
+        with:
+          context: composer1
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
+            PHP_VERSION=${{ matrix.php_version }}-node${{ matrix.node_version }}
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}
+          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache
+          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache,mode=max
+
+      - uses: docker/build-push-action@v4
+        if: ${{ matrix.node_version=='x' }}
+        with:
+          context: composer1
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
+            PHP_VERSION=${{ matrix.php_version }}
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}
+          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}-buildcache
+          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}-buildcache,mode=max
+
+      - uses: docker/build-push-action@v4
+        if: ${{ matrix.node_version!='x' && matrix.latest }}
+        with:
+          context: composer1
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
+            PHP_VERSION=${{ matrix.php_version }}-node${{ matrix.node_version }}
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: docker.io/disrex/gitlab-ci-composer1:latest-nodelatest
+          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:latest-nodelatest-buildcache
+          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:latest-nodelatest-buildcache,mode=max
+
+      - uses: docker/build-push-action@v4
+        if: ${{ matrix.node_version=='x' && matrix.latest }}
+        with:
+          context: composer1
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
+            PHP_VERSION=${{ matrix.php_version }}
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: docker.io/disrex/gitlab-ci-composer1:latest
+          cache-from: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:latest-buildcache
+          cache-to: type=registry,ref=docker.io/disrex/gitlab-ci-composer1:latest-buildcache,mode=max
