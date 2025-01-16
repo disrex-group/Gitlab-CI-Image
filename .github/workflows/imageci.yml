@@ -154,7 +154,7 @@ jobs:
           context: node
           platforms: linux/amd64,linux/arm64
           build-args: |
-            ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
+            ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
             PHP_VERSION=${{ matrix.php_version }}
             NODE_VERSION=${{ matrix.node_version }}
             OS_RELEASE=${{ matrix.node_os_release }}
@@ -169,7 +169,7 @@ jobs:
           context: node
           platforms: linux/amd64,linux/arm64
           build-args: |
-            ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
+            ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
             PHP_VERSION=${{ matrix.php_version }}
             NODE_VERSION=${{ matrix.node_version }}
             OS_RELEASE=${{ matrix.node_os_release }}
@@ -216,7 +216,7 @@ jobs:
           context: composer1
           platforms: linux/amd64,linux/arm64
           build-args: |
-            ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
+            ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
             PHP_VERSION=${{ matrix.php_version }}-node${{ matrix.node_version }}
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
           tags: ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }},docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}
@@ -229,7 +229,7 @@ jobs:
           context: composer1
           platforms: linux/amd64,linux/arm64
           build-args: |
-            ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
+            ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
             PHP_VERSION=${{ matrix.php_version }}
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
           tags:  ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }},docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}
@@ -242,7 +242,7 @@ jobs:
           context: composer1
           platforms: linux/amd64,linux/arm64
           build-args: |
-            ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
+            ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
             PHP_VERSION=${{ matrix.php_version }}-node${{ matrix.node_version }}
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
           tags:  ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:latest-nodelatest,docker.io/disrex/gitlab-ci-composer1:latest-nodelatest
@@ -255,7 +255,7 @@ jobs:
           context: composer1
           platforms: linux/amd64,linux/arm64
           build-args: |
-            ENV_SOURCE_IMAGE=docker.io/disrex/gitlab-ci
+            ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
             PHP_VERSION=${{ matrix.php_version }}
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
           tags:  ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:latest,docker.io/disrex/gitlab-ci-composer1:latest
