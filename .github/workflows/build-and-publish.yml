@@ -352,7 +352,7 @@ jobs:
       - name: Check if latest version
         id: latest
         run: |
-          ALL_VERSIONS='${{ toJson(needs.prepare-matrix.outputs.php_matrix) }}'
+          ALL_VERSIONS=${{ toJson(needs.prepare-matrix.outputs.php_matrix) }}
           LATEST=$(echo "$ALL_VERSIONS" | jq -r '.include[].version' | sort -V | tail -1)
           [[ "${{ matrix.version }}" == "$LATEST" ]] && echo "is_latest=true" >> $GITHUB_OUTPUT || echo "is_latest=false" >> $GITHUB_OUTPUT
 
@@ -412,12 +412,12 @@ jobs:
         id: latest
         run: |
           # Check if PHP is latest
-          PHP_VERSIONS='${{ toJson(needs.prepare-matrix.outputs.php_matrix) }}'
+          PHP_VERSIONS=${{ toJson(needs.prepare-matrix.outputs.php_matrix) }}
           LATEST_PHP=$(echo "$PHP_VERSIONS" | jq -r '.include[].version' | sort -V | tail -1)
           [[ "${{ matrix.php.version }}" == "$LATEST_PHP" ]] && PHP_LATEST=true || PHP_LATEST=false
           
           # Check if Node is latest
-          NODE_VERSIONS='${{ toJson(needs.prepare-matrix.outputs.node_matrix) }}'
+          NODE_VERSIONS=${{ toJson(needs.prepare-matrix.outputs.node_matrix) }}
           LATEST_NODE=$(echo "$NODE_VERSIONS" | jq -r '.include[].version' | sort -n | tail -1)
           [[ "${{ matrix.node.version }}" == "$LATEST_NODE" ]] && NODE_LATEST=true || NODE_LATEST=false
           
@@ -490,12 +490,12 @@ jobs:
         id: latest
         run: |
           # Check if PHP is latest
-          PHP_VERSIONS='${{ toJson(needs.prepare-matrix.outputs.php_matrix) }}'
+          PHP_VERSIONS=${{ toJson(needs.prepare-matrix.outputs.php_matrix) }}
           LATEST_PHP=$(echo "$PHP_VERSIONS" | jq -r '.include[].version' | sort -V | tail -1)
           [[ "${{ matrix.php.version }}" == "$LATEST_PHP" ]] && PHP_LATEST=true || PHP_LATEST=false
           
           # Check if Node is latest
-          NODE_VERSIONS='${{ toJson(needs.prepare-matrix.outputs.node_matrix) }}'
+          NODE_VERSIONS=${{ toJson(needs.prepare-matrix.outputs.node_matrix) }}
           LATEST_NODE=$(echo "$NODE_VERSIONS" | jq -r '.include[].version' | sort -n | tail -1)
           [[ "${{ matrix.node.version }}" == "$LATEST_NODE" ]] && NODE_LATEST=true || NODE_LATEST=false
           
