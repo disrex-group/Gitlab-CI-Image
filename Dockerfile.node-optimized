@@ -1,4 +1,4 @@
-ARG ENV_SOURCE_IMAGE
+ARG ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
 ARG PHP_VERSION
 ARG NODE_VERSION=18
 
@@ -27,7 +27,8 @@ RUN npm install -g \
     uglify-js \
     && npm cache clean --force
 
-# Copy PhantomJS if available
+# Copy PhantomJS if available (try GHCR mirror first, fallback to Docker Hub)
+COPY --from=ghcr.io/disrex-group/gitlab-ci-base-images/phantomjs:latest /build/phantomjs/bin/phantomjs /usr/local/bin/phantomjs 2>/dev/null || \
 COPY --from=rollupdev/phantomjs:latest /build/phantomjs/bin/phantomjs /usr/local/bin/phantomjs 2>/dev/null || true
 
 # Set up paths

@@ -1,0 +1,272 @@
+name: Mirror Base Images to GHCR
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: 'Force update all images even if they exist'
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Run weekly on Sunday at 2 AM UTC to catch updates
+    - cron: '0 2 * * 0'
+
+env:
+  REGISTRY: ghcr.io
+  REGISTRY_PATH: ghcr.io/${{ github.repository_owner }}/gitlab-ci-base-images
+
+jobs:
+  mirror-php-images:
+    name: Mirror PHP ${{ matrix.php_version }}-${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # PHP 7.1
+          - php_version: "7.1"
+            os_release: "buster"
+            variant: "cli"
+          # PHP 7.2
+          - php_version: "7.2"
+            os_release: "buster"
+            variant: "cli"
+          # PHP 7.3
+          - php_version: "7.3"
+            os_release: "bullseye"
+            variant: "cli"
+          # PHP 7.4
+          - php_version: "7.4"
+            os_release: "bullseye"
+            variant: "cli"
+          # PHP 8.0
+          - php_version: "8.0"
+            os_release: "bullseye"
+            variant: "cli"
+          # PHP 8.1
+          - php_version: "8.1"
+            os_release: "bookworm"
+            variant: "cli"
+          # PHP 8.2
+          - php_version: "8.2"
+            os_release: "bookworm"
+            variant: "cli"
+          # PHP 8.3
+          - php_version: "8.3"
+            os_release: "bookworm"
+            variant: "cli"
+          # PHP 8.4
+          - php_version: "8.4"
+            os_release: "bookworm"
+            variant: "cli"
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub (Optional)
+        if: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKER_PASSWORD != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Check if image exists
+        id: check
+        run: |
+          if docker manifest inspect ${{ env.REGISTRY_PATH }}/php:${{ matrix.php_version }}-${{ matrix.variant }}-${{ matrix.os_release }} > /dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Image already exists in GHCR"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Image does not exist, will mirror"
+          fi
+
+      - name: Pull and Push PHP Image
+        if: steps.check.outputs.exists == 'false' || github.event.inputs.force_update == 'true'
+        run: |
+          SOURCE_IMAGE="php:${{ matrix.php_version }}-${{ matrix.variant }}-${{ matrix.os_release }}"
+          TARGET_IMAGE="${{ env.REGISTRY_PATH }}/php:${{ matrix.php_version }}-${{ matrix.variant }}-${{ matrix.os_release }}"
+          
+          echo "Pulling $SOURCE_IMAGE from Docker Hub..."
+          docker pull $SOURCE_IMAGE
+          
+          echo "Tagging as $TARGET_IMAGE..."
+          docker tag $SOURCE_IMAGE $TARGET_IMAGE
+          
+          echo "Pushing to GHCR..."
+          docker push $TARGET_IMAGE
+          
+          # Also tag without OS release for convenience
+          docker tag $SOURCE_IMAGE ${{ env.REGISTRY_PATH }}/php:${{ matrix.php_version }}-${{ matrix.variant }}
+          docker push ${{ env.REGISTRY_PATH }}/php:${{ matrix.php_version }}-${{ matrix.variant }}
+          
+          echo "✅ Successfully mirrored $SOURCE_IMAGE to GHCR"
+
+  mirror-node-images:
+    name: Mirror Node ${{ matrix.node_version }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - node_version: "14"
+            os_release: "bullseye"
+          - node_version: "15"
+            os_release: "buster"
+          - node_version: "16"
+            os_release: "bullseye"
+          - node_version: "17"
+            os_release: "bullseye"
+          - node_version: "18"
+            os_release: "bullseye"
+          - node_version: "19"
+            os_release: "bullseye"
+          - node_version: "20"
+            os_release: "bookworm"
+          - node_version: "21"
+            os_release: "bookworm"
+          - node_version: "22"
+            os_release: "bookworm"
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub (Optional)
+        if: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKER_PASSWORD != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Check if image exists
+        id: check
+        run: |
+          if docker manifest inspect ${{ env.REGISTRY_PATH }}/node:${{ matrix.node_version }}-${{ matrix.os_release }} > /dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Image already exists in GHCR"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Image does not exist, will mirror"
+          fi
+
+      - name: Pull and Push Node Image
+        if: steps.check.outputs.exists == 'false' || github.event.inputs.force_update == 'true'
+        run: |
+          SOURCE_IMAGE="node:${{ matrix.node_version }}-${{ matrix.os_release }}"
+          TARGET_IMAGE="${{ env.REGISTRY_PATH }}/node:${{ matrix.node_version }}-${{ matrix.os_release }}"
+          
+          echo "Pulling $SOURCE_IMAGE from Docker Hub..."
+          docker pull $SOURCE_IMAGE
+          
+          echo "Tagging as $TARGET_IMAGE..."
+          docker tag $SOURCE_IMAGE $TARGET_IMAGE
+          
+          echo "Pushing to GHCR..."
+          docker push $TARGET_IMAGE
+          
+          echo "✅ Successfully mirrored $SOURCE_IMAGE to GHCR"
+
+  mirror-composer-images:
+    name: Mirror Composer Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["1", "2"]
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub (Optional)
+        if: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKER_PASSWORD != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Pull and Push Composer Image
+        run: |
+          SOURCE_IMAGE="composer:${{ matrix.version }}"
+          TARGET_IMAGE="${{ env.REGISTRY_PATH }}/composer:${{ matrix.version }}"
+          
+          echo "Pulling $SOURCE_IMAGE from Docker Hub..."
+          docker pull $SOURCE_IMAGE
+          
+          echo "Tagging as $TARGET_IMAGE..."
+          docker tag $SOURCE_IMAGE $TARGET_IMAGE
+          
+          echo "Pushing to GHCR..."
+          docker push $TARGET_IMAGE
+          
+          echo "✅ Successfully mirrored $SOURCE_IMAGE to GHCR"
+
+  mirror-phantomjs:
+    name: Mirror PhantomJS Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and Push PhantomJS Image
+        run: |
+          SOURCE_IMAGE="rollupdev/phantomjs:latest"
+          TARGET_IMAGE="${{ env.REGISTRY_PATH }}/phantomjs:latest"
+          
+          echo "Pulling $SOURCE_IMAGE from Docker Hub..."
+          docker pull $SOURCE_IMAGE || echo "Failed to pull PhantomJS, may not exist"
+          
+          if docker image inspect $SOURCE_IMAGE > /dev/null 2>&1; then
+            echo "Tagging as $TARGET_IMAGE..."
+            docker tag $SOURCE_IMAGE $TARGET_IMAGE
+            
+            echo "Pushing to GHCR..."
+            docker push $TARGET_IMAGE
+            
+            echo "✅ Successfully mirrored $SOURCE_IMAGE to GHCR"
+          else
+            echo "⚠️ PhantomJS image not available, skipping"
+          fi

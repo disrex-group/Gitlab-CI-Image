@@ -131,7 +131,15 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
         if: ${{ !env.ACT }}
 
-      - name: Login to DockerHub
+      - name: Login to DockerHub (for rate limits)
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+        if: ${{ !env.ACT && secrets.DOCKER_USERNAME != '' }}
+        continue-on-error: true
+
+      - name: Login to DockerHub (for pushing)
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -147,7 +155,7 @@ jobs:
           build-args: |
             PHP_VERSION=${{ matrix.php_version }}
             OS_RELEASE=${{ matrix.php_os_release }}
-            ENV_SOURCE_IMAGE=php
+            REGISTRY_BASE=ghcr.io/disrex-group/gitlab-ci-base-images
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php_version }}
@@ -165,7 +173,7 @@ jobs:
           build-args: |
             PHP_VERSION=${{ matrix.php_version }}
             OS_RELEASE=${{ matrix.php_os_release }}
-            ENV_SOURCE_IMAGE=php
+            REGISTRY_BASE=ghcr.io/disrex-group/gitlab-ci-base-images
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest
@@ -225,6 +233,7 @@ jobs:
             ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
             PHP_VERSION=${{ matrix.php.php_version }}
             NODE_VERSION=${{ matrix.node_version }}
+            REGISTRY_BASE=ghcr.io/disrex-group/gitlab-ci-base-images
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php.php_version }}-node${{ matrix.node_version }}
@@ -246,6 +255,7 @@ jobs:
             ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
             PHP_VERSION=${{ matrix.php.php_version }}
             NODE_VERSION=${{ matrix.node_version }}
+            REGISTRY_BASE=ghcr.io/disrex-group/gitlab-ci-base-images
           push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest-nodelatest

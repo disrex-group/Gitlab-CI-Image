@@ -1,7 +1,8 @@
 ARG PHP_VERSION
 ARG OS_RELEASE
+ARG REGISTRY_BASE=ghcr.io/disrex-group/gitlab-ci-base-images
 
-FROM ${ENV_SOURCE_IMAGE:-php}:${PHP_VERSION}-cli-${OS_RELEASE:-bullseye}
+FROM ${REGISTRY_BASE}/php:${PHP_VERSION}-cli-${OS_RELEASE:-bullseye}
 USER root
 ARG PHP_VERSION
 
@@ -122,7 +123,7 @@ RUN if [ "$(printf "8.2\n${PHP_VERSION}" | sort -g | head -n1)" != "8.2" ]; \
 
 ENV COMPOSER_ALLOW_SUPERUSER 1
 ENV COMPOSER_HOME /root/.composer
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+COPY --from=ghcr.io/disrex-group/gitlab-ci-base-images/composer:2 /usr/bin/composer /usr/bin/composer
 
 # clean up apt packages and temporary files
 RUN set -eux; \

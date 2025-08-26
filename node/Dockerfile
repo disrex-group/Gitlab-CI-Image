@@ -1,9 +1,10 @@
-ARG ENV_SOURCE_IMAGE
+ARG ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
 ARG PHP_VERSION
 ARG OS_RELEASE
 ARG NODE_VERSION
+ARG REGISTRY_BASE=ghcr.io/disrex-group/gitlab-ci-base-images
 
-FROM node:${NODE_VERSION}-${OS_RELEASE:-bullseye} AS node
+FROM ${REGISTRY_BASE}/node:${NODE_VERSION}-${OS_RELEASE:-bullseye} AS node
 # Removed puppeteer due to npm 403 error - can be installed at runtime if needed
 RUN npm install -g grunt-cli gulp requirejs terser uglify-js
 RUN mv /opt/yarn* /opt/yarn
@@ -17,8 +18,9 @@ COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=node /opt /opt
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 
-# Copy PhantomJS
-COPY --from=rollupdev/phantomjs:latest /build/phantomjs/bin/phantomjs /usr/local/bin/phantomjs
+# Copy PhantomJS (try GHCR mirror first, fallback to Docker Hub)
+COPY --from=ghcr.io/disrex-group/gitlab-ci-base-images/phantomjs:latest /build/phantomjs/bin/phantomjs /usr/local/bin/phantomjs 2>/dev/null || \
+COPY --from=rollupdev/phantomjs:latest /build/phantomjs/bin/phantomjs /usr/local/bin/phantomjs 2>/dev/null || true
 
 RUN ln -s /usr/local/bin/node /usr/local/bin/nodejs \
     && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
