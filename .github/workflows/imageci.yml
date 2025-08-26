@@ -1,10 +1,15 @@
 name: Gitlab CI PHP + Composer + Node + Yarn + NPM + Other
 on:
   workflow_dispatch:
+    inputs:
+      full_build:
+        description: 'Run full build (all PHP and Node combinations)'
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: "0 1 1 * *"   # 01 AM on first day of the month
   pull_request:
-  push:
     paths:
       - .trigger
       - node/Dockerfile
@@ -12,13 +17,23 @@ on:
       - Dockerfile
       - .github/workflows/imageci.yml
       - .github/workflows/php-matrix/*.php
+  push:
     branches:
       - master
+    paths:
+      - .trigger
+      - node/Dockerfile
+      - composer1/Dockerfile
+      - Dockerfile
+      - .github/workflows/imageci.yml
+      - .github/workflows/php-matrix/*.php
 
 jobs:
   php-matrix:
     name: Generate Base PHP Matrix
     runs-on: ubuntu-latest
+    # Only run on master, scheduled builds, or manual full builds
+    if: github.ref == 'refs/heads/master' || github.event_name == 'schedule' || github.event.inputs.full_build == 'true'
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
@@ -33,6 +48,8 @@ jobs:
   node-matrix:
     name: Generate Base PHP-Node Matrix
     runs-on: ubuntu-latest
+    # Only run on master, scheduled builds, or manual full builds
+    if: github.ref == 'refs/heads/master' || github.event_name == 'schedule' || github.event.inputs.full_build == 'true'
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
@@ -47,6 +64,8 @@ jobs:
   full-matrix:
     name: Generate Full Matrix
     runs-on: ubuntu-latest
+    # Only run on master, scheduled builds, or manual full builds
+    if: github.ref == 'refs/heads/master' || github.event_name == 'schedule' || github.event.inputs.full_build == 'true'
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:

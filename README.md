@@ -180,16 +180,14 @@ switch-node 20
 switch-node 16.20.0
 ```
 
-### Building Images Locally
+### Building Images
 
-Use the optimized build script:
-```bash
-# Build with default versions (PHP 8.4, Node 18)
-./build-optimized.sh
+Images are automatically built via GitHub Actions when:
+- Code is pushed to the `master` branch
+- A pull request is created (builds minimal set for testing)
+- Scheduled monthly builds (full build of all combinations)
+- Manual workflow dispatch (can choose full or minimal build)
 
-# Build with specific versions
-./build-optimized.sh 8.3 20
-./build-optimized.sh 7.4 14
-```
+For feature branches, builds are skipped by default to save resources. Use the "Run workflow" button in GitHub Actions to manually trigger a build if needed.
 
 I hope this helps! Let me know if you have any further questions.
