@@ -73,7 +73,9 @@ image: ghcr.io/disrex-group/gitlab-ci-composer1:<tag>
 - `7.4-node14` - PHP 7.4 + Node.js 14
 - And many more combinations...
 
-All PHP versions from 7.1 to 8.x and Node versions from 14+ are automatically built.
+All PHP versions from 7.4 to 8.x and Node versions from 14+ are automatically built.
+
+**Note**: PHP 7.1-7.3 are no longer supported as they reached end-of-life and use archived Debian Buster repositories.
 
 In your GitLab CI pipeline, you can then run commands using the tools available in the image. For example:
 ```yaml
@@ -154,10 +156,9 @@ The workflow uses GitHub matrix strategy with three parallel job types:
 
 ### 🔄 How Auto-Discovery Works
 
-1. **Version Detection**: Crane scans Docker Hub for PHP 7.1-8.x and Node 14+ versions
+1. **Version Detection**: Crane scans Docker Hub for PHP 7.4-8.x and Node 14+ versions
 2. **Smart OS Selection**: Automatically determines the correct base OS:
-   - PHP 7.1-7.2: Debian Buster
-   - PHP 7.3-7.4: Debian Bullseye  
+   - PHP 7.4: Debian Bullseye  
    - PHP 8.0: Debian Bullseye
    - PHP 8.1+: Debian Bookworm
 3. **Automatic Builds**: New versions trigger builds without manual intervention

@@ -38,14 +38,14 @@ jobs:
         run: |
           echo "📦 Discovering and mirroring PHP images..."
           
-          # Function to get OS release for PHP
+          # Function to get OS release for PHP (7.4+ only)
           get_php_os() {
             local ver=$1
             local major=${ver%%.*}
             local minor=${ver#*.}; minor=${minor%%.*}
             
             if [[ "$major" == "7" ]]; then
-              [[ "$minor" -le "2" ]] && echo "buster" || echo "bullseye"
+              echo "bullseye"  # 7.4 uses bullseye
             elif [[ "$major" == "8" ]]; then
               [[ "$minor" == "0" ]] && echo "bullseye" || echo "bookworm"
             else
@@ -53,15 +53,15 @@ jobs:
             fi
           }
           
-          # Discover PHP versions from Docker Hub
-          PHP_TAGS=$(crane ls php 2>/dev/null | grep -E '^[78]\.[0-9]+-cli-(buster|bullseye|bookworm)$' || true)
+          # Discover PHP versions from Docker Hub (7.4+ only, excluding EOL versions)
+          PHP_TAGS=$(crane ls php 2>/dev/null | grep -E '^[78]\.[0-9]+-cli-(bullseye|bookworm)$' || true)
           
           for tag in $PHP_TAGS; do
             VERSION=$(echo $tag | sed 's/-cli-.*//')
             OS_RELEASE=$(echo $tag | sed 's/.*-cli-//')
             
-            # Skip very old versions
-            if [[ "$VERSION" =~ ^7\.0 ]]; then
+            # Skip versions older than 7.4 (EOL versions)
+            if [[ "$VERSION" =~ ^7\.[0-3] ]]; then
               continue
             fi
             
@@ -81,8 +81,8 @@ jobs:
         run: |
           echo "📦 Discovering and mirroring Node images..."
           
-          # Discover Node versions from Docker Hub
-          NODE_TAGS=$(crane ls node 2>/dev/null | grep -E '^[0-9]+-(buster|bullseye|bookworm)$' || true)
+          # Discover Node versions from Docker Hub (bullseye/bookworm only)
+          NODE_TAGS=$(crane ls node 2>/dev/null | grep -E '^[0-9]+-(bullseye|bookworm)$' || true)
           
           for tag in $NODE_TAGS; do
             VERSION=$(echo $tag | sed 's/-.*//')

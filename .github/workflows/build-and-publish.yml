@@ -113,18 +113,18 @@ jobs:
             PHP_VERSIONS="${{ inputs.php_versions }}"
             NODE_VERSIONS="${{ inputs.node_versions }}"
           else
-            # Discover PHP versions from GHCR mirror
+            # Discover PHP versions from GHCR mirror (7.4+ only, excluding EOL versions with Buster)
             echo "📦 Discovering PHP versions from GHCR..."
             ALL_PHP=$(crane ls ${{ env.GHCR_BASE }}/php 2>/dev/null | \
-              grep -E '^[78]\.[0-9]+-cli-(buster|bullseye|bookworm)$' | \
-              sed 's/-cli-.*//' | sort -uV || echo "")
+              grep -E '^[78]\.[0-9]+-cli-(bullseye|bookworm)$' | \
+              sed 's/-cli-.*//' | sort -uV | awk '$1 >= "7.4"' || echo "")
             
             # Fallback to Docker Hub if GHCR is empty
             if [[ -z "$ALL_PHP" ]]; then
               echo "⚠️ GHCR empty, discovering from Docker Hub..."
               ALL_PHP=$(crane ls php 2>/dev/null | \
-                grep -E '^[78]\.[0-9]+-cli-(buster|bullseye|bookworm)$' | \
-                sed 's/-cli-.*//' | sort -uV || echo "")
+                grep -E '^[78]\.[0-9]+-cli-(bullseye|bookworm)$' | \
+                sed 's/-cli-.*//' | sort -uV | awk '$1 >= "7.4"' || echo "")
             fi
             
             # Discover Node versions
@@ -150,14 +150,14 @@ jobs:
             fi
           fi
           
-          # Determine OS release for each PHP version
+          # Determine OS release for each PHP version (7.4+ only)
           get_php_os() {
             local ver=$1
             local major=${ver%%.*}
             local minor=${ver#*.}; minor=${minor%%.*}
             
             if [[ "$major" == "7" ]]; then
-              [[ "$minor" -le "2" ]] && echo "buster" || echo "bullseye"
+              echo "bullseye"  # 7.4 uses bullseye
             elif [[ "$major" == "8" ]]; then
               [[ "$minor" == "0" ]] && echo "bullseye" || echo "bookworm"
             else
