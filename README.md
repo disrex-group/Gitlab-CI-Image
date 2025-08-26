@@ -145,7 +145,12 @@ The CI/CD pipeline has been fully optimized for automatic version discovery and 
 The workflow uses GitHub matrix strategy with three parallel job types:
 - **Base Images**: PHP images without Node.js (one per PHP version)
 - **Node Variants**: PHP + Node.js combinations (PHP versions × Node versions)
-- **Composer1 Legacy**: PHP images with Composer v1 (one per PHP version)
+- **Composer1 Legacy**: PHP + Node.js images with Composer v1 (PHP × Node versions)
+
+**Smart Build Optimization**: The workflow automatically checks for existing images in the registry and skips rebuilding them unless:
+- Force rebuild checkbox is selected in manual workflow dispatch
+- Triggered by weekly schedule, mirror completion, or push to master
+- Image doesn't exist in the registry yet
 
 ### 🔄 How Auto-Discovery Works
 
@@ -169,7 +174,11 @@ You can manually trigger builds via GitHub Actions:
    - **latest-only**: Quick build of newest versions
    - **full**: Build all PHP/Node combinations
    - **custom**: Specify versions (e.g., PHP: "8.3,8.4" Node: "20,22")
-4. Click "Run workflow"
+4. Optional force rebuild checkboxes:
+   - **Force rebuild base images**: Rebuild even if they exist in registry
+   - **Force rebuild node images**: Rebuild even if they exist in registry
+   - **Force rebuild composer1 images**: Rebuild even if they exist in registry
+5. Click "Run workflow"
 
 The build system automatically handles:
 - Dependency ordering (base images → node variants → composer1)
