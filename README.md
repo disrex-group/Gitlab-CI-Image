@@ -18,9 +18,10 @@ It has the following PHP extensions installed:
 - BCMath
 - Calendar
 - Exif
+- FTP
 - GD
 - Intl
-- Imagick
+- Imagick (for PHP < 8.3)
 - IMAP
 - MySQLi
 - PCNTL

@@ -98,6 +98,7 @@ RUN chmod +x /usr/local/bin/install-php-extensions && install-php-extensions \
     bcmath \
     calendar \
     exif \
+    ftp \
     gd \
     intl \
     imap \

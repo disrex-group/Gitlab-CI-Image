@@ -1,13 +1,13 @@
 <?php
 
-const PHP_LATEST = '8.3';
+const PHP_LATEST = '8.4';
 
 /*
 * Don't include older builds because these are already build and not going to be updated from official repo
 * If there is something changed in our Dockerfile and you want to build all versions then define it as follows:
 * const PHP_VERSIONS = ['7.1', '7.2', '7.3', '7.4', '8.0', '8.1', '8.2'];
 */
-const PHP_VERSIONS = ['7.1', '7.2', '7.3', '7.4', '8.0', '8.1', '8.2', '8.3'];
+const PHP_VERSIONS = ['7.1', '7.2', '7.3', '7.4', '8.0', '8.1', '8.2', '8.3', '8.4'];
 const PHP_VERSIONS_OS_RELEASE = [
     '7.1' => 'buster',
     '7.2' => 'buster',
@@ -16,7 +16,8 @@ const PHP_VERSIONS_OS_RELEASE = [
     '8.0' => 'bullseye',
     '8.1' => 'bookworm',
     '8.2' => 'bookworm',
-    '8.3' => 'bookworm'
+    '8.3' => 'bookworm',
+    '8.4' => 'bookworm'
 ];
 const NODE_LATEST = '21';
 const NODE_VERSIONS = ['14', '15', '16', '17', '18', '19', '20', '21', '22', '23'];
