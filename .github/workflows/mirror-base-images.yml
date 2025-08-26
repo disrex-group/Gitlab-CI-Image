@@ -93,16 +93,6 @@ jobs:
               echo "🔄 Mirroring ${SOURCE} to ${TARGET}..."
               crane copy "$SOURCE" "$TARGET" && echo "✅ Mirrored PHP ${VERSION}" || echo "❌ Failed to mirror PHP ${VERSION}"
             fi
-            
-            # Clean up old OS variants for this version
-            echo "  Cleaning old variants for PHP ${VERSION}..."
-            crane ls ${{ env.GHCR_BASE }}/php 2>/dev/null | \
-              grep "^${VERSION}-cli-" | \
-              grep -v "^${TAG}$" | \
-              while read OLD_TAG; do
-                echo "  🗑️ Removing old variant: ${OLD_TAG}"
-                crane delete "${{ env.GHCR_BASE }}/php:${OLD_TAG}" 2>/dev/null || true
-              done
           done
 
       - name: Mirror Node images
@@ -142,16 +132,6 @@ jobs:
               echo "🔄 Mirroring ${SOURCE} to ${TARGET}..."
               crane copy "$SOURCE" "$TARGET" && echo "✅ Mirrored Node ${VERSION}" || echo "❌ Failed to mirror Node ${VERSION}"
             fi
-            
-            # Clean up old OS variants for this version
-            echo "  Cleaning old variants for Node ${VERSION}..."
-            crane ls ${{ env.GHCR_BASE }}/node 2>/dev/null | \
-              grep "^${VERSION}-" | \
-              grep -v "^${TAG}$" | \
-              while read OLD_TAG; do
-                echo "  🗑️ Removing old variant: ${OLD_TAG}"
-                crane delete "${{ env.GHCR_BASE }}/node:${OLD_TAG}" 2>/dev/null || true
-              done
           done
 
       - name: Mirror Composer images
@@ -183,71 +163,6 @@ jobs:
             echo "🔄 Mirroring ${SOURCE} to ${TARGET}..."
             crane copy "$SOURCE" "$TARGET" && echo "✅ Mirrored PhantomJS" || echo "❌ Failed to mirror PhantomJS"
           fi
-
-      - name: Final cleanup of duplicate OS variants
-        run: |
-          echo "🧹 Running final cleanup of duplicate OS variants..."
-          
-          # Function to determine preferred OS for PHP version
-          get_preferred_php_os() {
-            local ver=$1
-            local major=${ver%%.*}
-            local minor=${ver#*.}; minor=${minor%%.*}
-            
-            if [[ "$major" == "7" ]]; then
-              echo "bullseye"  # 7.4 uses bullseye
-            elif [[ "$major" == "8" ]]; then
-              [[ "$minor" == "0" ]] && echo "bullseye" || echo "bookworm"
-            else
-              echo "bookworm"
-            fi
-          }
-          
-          # Clean up PHP duplicates
-          echo "Cleaning PHP duplicates..."
-          PHP_VERSIONS=$(crane ls ${{ env.GHCR_BASE }}/php 2>/dev/null | \
-            grep -E '^[78]\.[0-9]+-cli-(bullseye|bookworm)$' | \
-            sed 's/-cli-.*//' | sort -u)
-          
-          for VERSION in $PHP_VERSIONS; do
-            PREFERRED_OS=$(get_preferred_php_os "$VERSION")
-            PREFERRED_TAG="${VERSION}-cli-${PREFERRED_OS}"
-            
-            # Delete all variants except the preferred one
-            crane ls ${{ env.GHCR_BASE }}/php 2>/dev/null | \
-              grep "^${VERSION}-cli-" | \
-              grep -v "^${PREFERRED_TAG}$" | \
-              while read OLD_TAG; do
-                echo "  🗑️ Removing duplicate: php:${OLD_TAG}"
-                crane delete "${{ env.GHCR_BASE }}/php:${OLD_TAG}" 2>/dev/null || true
-              done
-          done
-          
-          # Clean up Node duplicates (keep only bookworm or fallback to bullseye)
-          echo "Cleaning Node duplicates..."
-          NODE_VERSIONS=$(crane ls ${{ env.GHCR_BASE }}/node 2>/dev/null | \
-            grep -E '^[0-9]+-(bullseye|bookworm)$' | \
-            sed 's/-.*//' | sort -un)
-          
-          for VERSION in $NODE_VERSIONS; do
-            # Check what's available and prefer bookworm
-            if crane manifest "${{ env.GHCR_BASE }}/node:${VERSION}-bookworm" >/dev/null 2>&1; then
-              PREFERRED_TAG="${VERSION}-bookworm"
-            else
-              PREFERRED_TAG="${VERSION}-bullseye"
-            fi
-            
-            # Delete all variants except the preferred one
-            crane ls ${{ env.GHCR_BASE }}/node 2>/dev/null | \
-              grep "^${VERSION}-" | \
-              grep -v "^${PREFERRED_TAG}$" | \
-              while read OLD_TAG; do
-                echo "  🗑️ Removing duplicate: node:${OLD_TAG}"
-                crane delete "${{ env.GHCR_BASE }}/node:${OLD_TAG}" 2>/dev/null || true
-              done
-          done
-          
-          echo "✅ Cleanup complete"
 
       - name: Summary
         run: |

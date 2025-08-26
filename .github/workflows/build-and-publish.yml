@@ -113,13 +113,13 @@ jobs:
             PHP_VERSIONS="${{ inputs.php_versions }}"
             NODE_VERSIONS="${{ inputs.node_versions }}"
           else
-            # Discover PHP versions from GHCR mirror (7.4+ only, using newest OS variant)
+            # Discover PHP versions from GHCR mirror (7.4+ only)
             echo "📦 Discovering PHP versions from GHCR..."
-            # Get unique PHP versions, preferring newest OS (bookworm > bullseye)
+            # Get unique PHP versions (mirror workflow ensures only one OS variant per version)
             ALL_PHP=$(crane ls ${{ env.GHCR_BASE }}/php 2>/dev/null | \
               grep -E '^[78]\.[0-9]+-cli-(bullseye|bookworm)$' | \
-              sort -t- -k1,1V -k3,3r | \
-              awk -F'-cli-' '!seen[$1]++ {print $1}' | \
+              awk -F'-cli-' '{print $1}' | \
+              sort -uV | \
               awk '$1 >= "7.4"' || echo "")
             
             # Fallback to Docker Hub if GHCR is empty
@@ -127,25 +127,26 @@ jobs:
               echo "⚠️ GHCR empty, discovering from Docker Hub..."
               ALL_PHP=$(crane ls php 2>/dev/null | \
                 grep -E '^[78]\.[0-9]+-cli-(bullseye|bookworm)$' | \
-                sort -t- -k1,1V -k3,3r | \
-                awk -F'-cli-' '!seen[$1]++ {print $1}' | \
+                awk -F'-cli-' '{print $1}' | \
+                sort -uV | \
                 awk '$1 >= "7.4"' || echo "")
             fi
             
-            # Discover Node versions (using newest OS variant)
+            # Discover Node versions
             echo "📦 Discovering Node versions..."
-            # Get unique Node versions, preferring newest OS (bookworm > bullseye)
+            # Get unique Node versions (mirror workflow ensures only one OS variant per version)
             ALL_NODE=$(crane ls ${{ env.GHCR_BASE }}/node 2>/dev/null | \
               grep -E '^[0-9]+-(bullseye|bookworm)$' | \
-              sort -t- -k1,1n -k2,2r | \
-              awk -F'-' '$1 >= 14 && !seen[$1]++ {print $1}' || echo "")
+              awk -F'-' '{print $1}' | \
+              sort -un | \
+              awk '$1 >= 14' || echo "")
             
             if [[ -z "$ALL_NODE" ]]; then
               echo "⚠️ GHCR empty, discovering from Docker Hub..."
               ALL_NODE=$(crane ls node 2>/dev/null | \
                 grep -E '^[0-9]+-(bullseye|bookworm)$' | \
-                sort -t- -k1,1n -k2,2r | \
-                awk -F'-' '!seen[$1]++ {print $1}' | \
+                awk -F'-' '{print $1}' | \
+                sort -un | \
                 awk '$1 >= 14' || echo "")
             fi
             
