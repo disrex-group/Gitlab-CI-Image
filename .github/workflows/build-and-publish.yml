@@ -235,7 +235,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-node-images:
-    name: Build Node Variants
+    name: Build PHP ${{ matrix.php.version }} + Node ${{ matrix.node.version }}
     needs: [prepare-matrix, build-base-images]
     if: needs.prepare-matrix.outputs.build_needed == 'true'
     runs-on: ubuntu-latest
@@ -302,8 +302,8 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-composer1-images:
-    name: Build Composer1 PHP ${{ matrix.version }}
-    needs: [prepare-matrix, build-base-images]
+    name: Build Composer1 PHP ${{ matrix.php.version }} + Node ${{ matrix.node.version }}
+    needs: [prepare-matrix, build-node-images]
     if: needs.prepare-matrix.outputs.build_needed == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -311,7 +311,9 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.prepare-matrix.outputs.php_matrix) }}
+      matrix:
+        php: ${{ fromJson(needs.prepare-matrix.outputs.php_matrix) }}
+        node: ${{ fromJson(needs.prepare-matrix.outputs.node_matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -329,12 +331,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check if latest version
+      - name: Check if latest versions
         id: latest
         run: |
-          ALL_VERSIONS='${{ toJson(needs.prepare-matrix.outputs.php_matrix) }}'
-          LATEST=$(echo "$ALL_VERSIONS" | jq -r '.include[].version' | sort -V | tail -1)
-          [[ "${{ matrix.version }}" == "$LATEST" ]] && echo "is_latest=true" >> $GITHUB_OUTPUT || echo "is_latest=false" >> $GITHUB_OUTPUT
+          # Check if PHP is latest
+          PHP_VERSIONS='${{ toJson(needs.prepare-matrix.outputs.php_matrix) }}'
+          LATEST_PHP=$(echo "$PHP_VERSIONS" | jq -r '.include[].version' | sort -V | tail -1)
+          [[ "${{ matrix.php.version }}" == "$LATEST_PHP" ]] && PHP_LATEST=true || PHP_LATEST=false
+          
+          # Check if Node is latest
+          NODE_VERSIONS='${{ toJson(needs.prepare-matrix.outputs.node_matrix) }}'
+          LATEST_NODE=$(echo "$NODE_VERSIONS" | jq -r '.include[].version' | sort -n | tail -1)
+          [[ "${{ matrix.node.version }}" == "$LATEST_NODE" ]] && NODE_LATEST=true || NODE_LATEST=false
+          
+          # Both must be latest for the special tag
+          if [[ "$PHP_LATEST" == "true" && "$NODE_LATEST" == "true" ]]; then
+            echo "is_latest=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_latest=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build and push Composer1 variant
         uses: docker/build-push-action@v5
@@ -344,10 +359,11 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           build-args: |
             ENV_SOURCE_IMAGE=${{ env.TARGET_REGISTRY }}
-            PHP_VERSION=${{ matrix.version }}
+            PHP_VERSION=${{ matrix.php.version }}
+            NODE_VERSION=${{ matrix.node.version }}
             REGISTRY_BASE=${{ env.GHCR_BASE }}
           tags: |
-            ${{ env.TARGET_REGISTRY }}-composer1:${{ matrix.version }}
-            ${{ steps.latest.outputs.is_latest == 'true' && format('{0}-composer1:latest', env.TARGET_REGISTRY) || '' }}
+            ${{ env.TARGET_REGISTRY }}-composer1:${{ matrix.php.version }}-node${{ matrix.node.version }}
+            ${{ steps.latest.outputs.is_latest == 'true' && format('{0}-composer1:latest-nodelatest', env.TARGET_REGISTRY) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

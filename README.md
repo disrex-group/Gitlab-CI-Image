@@ -142,10 +142,10 @@ The CI/CD pipeline has been fully optimized for automatic version discovery and 
 
 ### 🏗️ Build Architecture
 
-The workflow uses GitHub matrix strategy with three parallel jobs:
-- **Base Images**: PHP images without Node.js
-- **Node Variants**: PHP + Node.js combinations  
-- **Composer1 Legacy**: PHP images with Composer v1
+The workflow uses GitHub matrix strategy with three parallel job types:
+- **Base Images**: PHP images without Node.js (one per PHP version)
+- **Node Variants**: PHP + Node.js combinations (PHP versions × Node versions)
+- **Composer1 Legacy**: PHP images with Composer v1 (one per PHP version)
 
 ### 🔄 How Auto-Discovery Works
 
