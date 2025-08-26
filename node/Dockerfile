@@ -3,8 +3,8 @@ ARG PHP_VERSION
 ARG NODE_VERSION
 ARG REGISTRY_BASE=ghcr.io/disrex-group/gitlab-ci-base-images
 
-# Determine OS release based on Node version
-FROM ${REGISTRY_BASE}/node:${NODE_VERSION}-bullseye AS node-source
+# Try bookworm first, will use whatever is available in mirrored images
+FROM ${REGISTRY_BASE}/node:${NODE_VERSION}-bookworm AS node-source
 # Install global packages (puppeteer removed due to npm 403)
 RUN npm install -g grunt-cli gulp requirejs terser uglify-js && \
     mv /opt/yarn* /opt/yarn
