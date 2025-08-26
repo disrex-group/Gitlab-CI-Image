@@ -97,76 +97,44 @@ This example shows a simple build stage that runs Composer install, Yarn install
 
 Remember to adjust the commands according to your project's needs.
 
-## Updating PHP and Node.js Versions in CI Workflows
+## Automatic Version Updates
 
-### Introduction
+The CI/CD pipeline automatically discovers and builds new PHP and Node.js versions as they are released on Docker Hub. There's no need to manually update configuration files.
 
-Our CI workflows are configured to support multiple versions of PHP and Node.js. To ensure flexibility and up-to-date testing environments, these versions can be updated or extended as needed.
+### How It Works
 
-### File Location
+- **Daily Discovery**: The pipeline checks Docker Hub daily for new versions
+- **Automatic Detection**: When PHP 8.5 or Node 24 is released, it's automatically detected
+- **Smart OS Selection**: Automatically determines the correct OS base (buster/bullseye/bookworm)
+- **Zero Configuration**: No manual intervention required
 
-The versions are defined in the `constants.php` file located at `.github/workflows/php-matrix/constants.php`.
+### Manual Override
 
-### Editing Instructions
-
-1. **Open `constants.php`**: Locate and open the `constants.php` file in your preferred code editor.
-
-2. **Update PHP Versions**:
-    - **Add New PHP Versions**: Append new versions to the `PHP_VERSIONS` array.
-    - **Update Latest PHP Version**: Modify `PHP_LATEST` if adding a newer version.
-    - **Specify OS Release**: Add the corresponding OS release for the new PHP version in `PHP_VERSIONS_OS_RELEASE`.
-
-3. **Update Node.js Versions**:
-    - **Add New Node.js Versions**: Append new versions to the `NODE_VERSIONS` array.
-    - **Update Latest Node.js Version**: Adjust `NODE_LATEST` if adding a newer version.
-    - **Specify OS Release**: Add the corresponding OS release for the new Node.js version in `NODE_VERSIONS_OS_RELEASE`.
-
-4. **Handle Experimental/Non-Stable Versions**: For experimental or unstable versions, especially for PHP, add them to `EXPERIMENTAL_PHP_VERSIONS` or `NOT_STABLE_XDEBUG_PHP_VERSIONS`.
-
-5. **Save and Commit**: After editing, save the file, commit, and push your changes to the repository.
-
-6. **Test Your Changes**: Ensure GitHub Actions workflows function correctly with the new versions.
-
-7. **Documentation**: Update any related documentation to reflect the new supported versions.
-
-### Example
-
-Here is an example of how to add PHP 8.3 and Node.js 22:
-
-```php
-<?php
-
-const PHP_LATEST = '8.3';
-const PHP_VERSIONS = ['7.1', '7.2', '7.3', '7.4', '8.0', '8.1', '8.2', '8.3'];
-const PHP_VERSIONS_OS_RELEASE = [
-    // existing entries
-    '8.3' => 'bookworm', // Replace with the correct OS release for PHP 8.3
-];
-
-const NODE_LATEST = '22';
-const NODE_VERSIONS = ['10', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22'];
-const NODE_VERSIONS_OS_RELEASE = [
-    // existing entries
-    '22' => 'bookworm', // Replace with the correct OS release for Node.js 22
-];
-
-const EXPERIMENTAL_PHP_VERSIONS = [];
-const NOT_STABLE_XDEBUG_PHP_VERSIONS = ['7.0', '7.1', '7.2', '7.3', '7.4'];
-```
-
-### Note
-
-When adding new versions, ensure the corresponding OS release is accurate. These releases are key for the correct functioning of the CI workflows.
+If you need to build specific versions, you can trigger the workflow manually:
+1. Go to Actions → "Build Docker Images"
+2. Click "Run workflow"
+3. Optionally specify PHP/Node versions (comma-separated)
+4. Click "Run workflow"
 
 Please note that this image is specifically tailored for GitLab CI usage and may not work as expected outside of the GitLab CI environment.
 
-## Build Optimization
+## Build Optimization & Auto-Discovery
 
 The build process has been optimized to:
-- Build PHP base images once and reuse them for Node.js variants
+- **Auto-discover new PHP/Node versions** from Docker Hub using crane
+- **Mirror base images to GHCR** to avoid Docker Hub rate limits
+- **Build PHP base images once** and reuse them for Node.js variants
+- **Smart builds** - only rebuild when new versions are detected
 - Use the `n` package for Node.js version management
 - Remove puppeteer from base installation (can be installed at runtime)
-- Improve build caching and reduce build times
+- Improve build caching with GitHub Actions cache
+
+### How Auto-Discovery Works
+
+1. **Daily scans** - The workflow runs daily to check Docker Hub for new PHP/Node versions
+2. **Automatic mirroring** - New base images are automatically mirrored to GHCR
+3. **Smart rebuilds** - Only builds images when new versions are detected
+4. **No manual updates** - No need to manually update version lists when PHP 8.5 or Node 24 releases!
 
 ### Switching Node.js Versions
 

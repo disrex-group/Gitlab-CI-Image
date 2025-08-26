@@ -1,0 +1,297 @@
+name: Docker CI Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild all images'
+        required: false
+        type: boolean
+        default: false
+      php_versions:
+        description: 'PHP versions (comma-separated, auto-discovers if empty)'
+        required: false
+        type: string
+      node_versions:
+        description: 'Node versions (comma-separated, auto-discovers if empty)'
+        required: false
+        type: string
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC
+  push:
+    branches: [master]
+    paths:
+      - 'Dockerfile*'
+      - '.github/workflows/*.yml'
+  pull_request:
+    paths:
+      - 'Dockerfile*'
+      - '.github/workflows/*.yml'
+
+env:
+  GHCR_REGISTRY: ghcr.io
+  GHCR_BASE: ghcr.io/${{ github.repository_owner }}/gitlab-ci-base-images
+  TARGET_REGISTRY: ghcr.io/${{ github.repository_owner }}/gitlab-ci
+  DOCKER_REGISTRY: docker.io/disrex/gitlab-ci
+
+jobs:
+  discover-and-prepare:
+    name: Discover Versions & Mirror Images
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    outputs:
+      php_versions: ${{ steps.discover.outputs.php_versions }}
+      node_versions: ${{ steps.discover.outputs.node_versions }}
+      build_scope: ${{ steps.discover.outputs.build_scope }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup crane
+        uses: imjasonh/setup-crane@v0.4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request' && secrets.DOCKER_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+        continue-on-error: true
+
+      - name: Determine build scope
+        id: scope
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "build_scope=minimal" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "schedule" ]] || \
+               [[ "${{ github.ref }}" == "refs/heads/master" ]] || \
+               [[ "${{ inputs.force_rebuild }}" == "true" ]]; then
+            echo "build_scope=full" >> $GITHUB_OUTPUT
+          else
+            echo "build_scope=minimal" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Discover and mirror images
+        id: discover
+        run: |
+          BUILD_SCOPE="${{ steps.scope.outputs.build_scope }}"
+          echo "build_scope=$BUILD_SCOPE" >> $GITHUB_OUTPUT
+          
+          # Function to get OS release for PHP
+          get_php_os() {
+            local ver=$1
+            local major=${ver%%.*}
+            local minor=${ver#*.}; minor=${minor%%.*}
+            
+            if [[ "$major" == "7" ]]; then
+              [[ "$minor" -le "2" ]] && echo "buster" || echo "bullseye"
+            elif [[ "$major" == "8" ]]; then
+              [[ "$minor" == "0" ]] && echo "bullseye" || echo "bookworm"
+            else
+              echo "bookworm"
+            fi
+          }
+          
+          # Get Node OS release
+          get_node_os() {
+            [[ "$1" -le "15" ]] && echo "buster" || \
+            [[ "$1" -le "19" ]] && echo "bullseye" || \
+            echo "bookworm"
+          }
+          
+          # Process PHP versions
+          if [[ -n "${{ inputs.php_versions }}" ]]; then
+            PHP_VERSIONS="${{ inputs.php_versions }}"
+          else
+            echo "📦 Auto-discovering PHP versions..."
+            PHP_VERSIONS=$(crane ls php 2>/dev/null | \
+              grep -E '^[78]\.[0-9]+-cli-(buster|bullseye|bookworm)$' | \
+              sed 's/-cli-.*//' | sort -uV | \
+              if [[ "$BUILD_SCOPE" == "minimal" ]]; then tail -1; else cat; fi | \
+              tr '\n' ',' | sed 's/,$//')
+          fi
+          
+          # Process Node versions
+          if [[ -n "${{ inputs.node_versions }}" ]]; then
+            NODE_VERSIONS="${{ inputs.node_versions }}"
+          else
+            echo "📦 Auto-discovering Node versions..."
+            NODE_VERSIONS=$(crane ls node 2>/dev/null | \
+              grep -E '^[0-9]+-(buster|bullseye|bookworm)$' | \
+              sed 's/-.*//' | sort -n | \
+              awk '$1 >= 14' | \
+              if [[ "$BUILD_SCOPE" == "minimal" ]]; then echo "20,22"; else tr '\n' ',' | sed 's/,$//'; fi)
+          fi
+          
+          echo "PHP versions: $PHP_VERSIONS"
+          echo "Node versions: $NODE_VERSIONS"
+          echo "php_versions=$PHP_VERSIONS" >> $GITHUB_OUTPUT
+          echo "node_versions=$NODE_VERSIONS" >> $GITHUB_OUTPUT
+          
+          # Mirror PHP images
+          IFS=',' read -ra PHP_ARRAY <<< "$PHP_VERSIONS"
+          for version in "${PHP_ARRAY[@]}"; do
+            os=$(get_php_os "$version")
+            SOURCE="php:${version}-cli-${os}"
+            TARGET="${{ env.GHCR_BASE }}/php:${version}-cli-${os}"
+            
+            if crane manifest "$TARGET" >/dev/null 2>&1 && [[ "${{ inputs.force_rebuild }}" != "true" ]]; then
+              echo "✓ PHP $version already mirrored"
+            else
+              echo "🔄 Mirroring PHP $version..."
+              crane copy "$SOURCE" "$TARGET" || echo "⚠️ Failed to mirror $SOURCE"
+            fi
+          done
+          
+          # Mirror Node images
+          IFS=',' read -ra NODE_ARRAY <<< "$NODE_VERSIONS"
+          for version in "${NODE_ARRAY[@]}"; do
+            os=$(get_node_os "$version")
+            SOURCE="node:${version}-${os}"
+            TARGET="${{ env.GHCR_BASE }}/node:${version}-${os}"
+            
+            if crane manifest "$TARGET" >/dev/null 2>&1 && [[ "${{ inputs.force_rebuild }}" != "true" ]]; then
+              echo "✓ Node $version already mirrored"
+            else
+              echo "🔄 Mirroring Node $version..."
+              crane copy "$SOURCE" "$TARGET" || echo "⚠️ Failed to mirror $SOURCE"
+            fi
+          done
+          
+          # Mirror Composer
+          for ver in 1 2; do
+            TARGET="${{ env.GHCR_BASE }}/composer:${ver}"
+            if crane manifest "$TARGET" >/dev/null 2>&1 && [[ "${{ inputs.force_rebuild }}" != "true" ]]; then
+              echo "✓ Composer $ver already mirrored"
+            else
+              echo "🔄 Mirroring Composer $ver..."
+              crane copy "composer:${ver}" "$TARGET" || echo "⚠️ Failed to mirror composer:${ver}"
+            fi
+          done
+
+  build-images:
+    name: Build Images
+    needs: discover-and-prepare
+    if: needs.discover-and-prepare.outputs.php_versions != ''
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ${{ fromJson(format('[{0}]', needs.discover-and-prepare.outputs.php_versions)) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request' && secrets.DOCKER_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Determine OS release
+        id: os
+        run: |
+          version="${{ matrix.php }}"
+          major=${version%%.*}
+          minor=${version#*.}; minor=${minor%%.*}
+          
+          if [[ "$major" == "7" ]]; then
+            [[ "$minor" -le "2" ]] && os="buster" || os="bullseye"
+          elif [[ "$major" == "8" ]]; then
+            [[ "$minor" == "0" ]] && os="bullseye" || os="bookworm"
+          else
+            os="bookworm"
+          fi
+          echo "release=$os" >> $GITHUB_OUTPUT
+
+      - name: Determine if latest
+        id: latest
+        run: |
+          ALL_VERSIONS="${{ needs.discover-and-prepare.outputs.php_versions }}"
+          LATEST=$(echo "$ALL_VERSIONS" | tr ',' '\n' | sort -V | tail -1)
+          [[ "${{ matrix.php }}" == "$LATEST" ]] && echo "is_latest=true" >> $GITHUB_OUTPUT || echo "is_latest=false" >> $GITHUB_OUTPUT
+
+      - name: Build PHP base image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            PHP_VERSION=${{ matrix.php }}
+            OS_RELEASE=${{ steps.os.outputs.release }}
+            REGISTRY_BASE=${{ env.GHCR_BASE }}
+          tags: |
+            ${{ env.TARGET_REGISTRY }}:${{ matrix.php }}
+            ${{ secrets.DOCKER_USERNAME != '' && format('{0}:{1}', env.DOCKER_REGISTRY, matrix.php) || '' }}
+            ${{ steps.latest.outputs.is_latest == 'true' && format('{0}:latest', env.TARGET_REGISTRY) || '' }}
+            ${{ steps.latest.outputs.is_latest == 'true' && secrets.DOCKER_USERNAME != '' && format('{0}:latest', env.DOCKER_REGISTRY) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Node variants
+        if: needs.discover-and-prepare.outputs.build_scope == 'full'
+        run: |
+          NODE_VERSIONS="${{ needs.discover-and-prepare.outputs.node_versions }}"
+          IFS=',' read -ra NODE_ARRAY <<< "$NODE_VERSIONS"
+          
+          for node_version in "${NODE_ARRAY[@]}"; do
+            echo "Building PHP ${{ matrix.php }} + Node $node_version..."
+            
+            docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              --push=${{ github.event_name != 'pull_request' }} \
+              --file Dockerfile.node-optimized \
+              --build-arg ENV_SOURCE_IMAGE=${{ env.TARGET_REGISTRY }} \
+              --build-arg PHP_VERSION=${{ matrix.php }} \
+              --build-arg NODE_VERSION=$node_version \
+              --build-arg REGISTRY_BASE=${{ env.GHCR_BASE }} \
+              --tag ${{ env.TARGET_REGISTRY }}:${{ matrix.php }}-node$node_version \
+              ${{ secrets.DOCKER_USERNAME != '' && format('--tag {0}:{1}-node{2}', env.DOCKER_REGISTRY, matrix.php, node_version) || '' }} \
+              .
+          done
+
+      - name: Build Composer 1 variant
+        if: needs.discover-and-prepare.outputs.build_scope == 'full'
+        uses: docker/build-push-action@v5
+        with:
+          context: composer1
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            ENV_SOURCE_IMAGE=${{ env.TARGET_REGISTRY }}
+            PHP_VERSION=${{ matrix.php }}
+            REGISTRY_BASE=${{ env.GHCR_BASE }}
+          tags: |
+            ${{ env.TARGET_REGISTRY }}-composer1:${{ matrix.php }}
+            ${{ secrets.DOCKER_USERNAME != '' && format('docker.io/disrex/gitlab-ci-composer1:{0}', matrix.php) || '' }}
+            ${{ steps.latest.outputs.is_latest == 'true' && format('{0}-composer1:latest', env.TARGET_REGISTRY) || '' }}
+            ${{ steps.latest.outputs.is_latest == 'true' && secrets.DOCKER_USERNAME != '' && 'docker.io/disrex/gitlab-ci-composer1:latest' || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
