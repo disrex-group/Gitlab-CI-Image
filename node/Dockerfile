@@ -4,7 +4,8 @@ ARG OS_RELEASE
 ARG NODE_VERSION
 
 FROM node:${NODE_VERSION}-${OS_RELEASE:-bullseye} AS node
-RUN npm install -g grunt-cli gulp puppeteer requirejs terser
+# Removed puppeteer due to npm 403 error - can be installed at runtime if needed
+RUN npm install -g grunt-cli gulp requirejs terser uglify-js
 RUN mv /opt/yarn* /opt/yarn
 
 FROM ${ENV_SOURCE_IMAGE}:${PHP_VERSION}
@@ -34,5 +35,5 @@ RUN ln -s /usr/local/bin/node /usr/local/bin/nodejs \
 ENV PATH="${PATH}:/usr/local/lib/node_modules/bin"
 ENV NODE_PATH="/usr/local/lib/node_modules"
 
-# Ensure that puppeteer chrome build is downloaded correctly.
-RUN npm -g install puppeteer
+# Note: Puppeteer removed due to npm 403 error
+# Can be installed at runtime with: npm install puppeteer --no-save

@@ -37,10 +37,16 @@ It has the following PHP extensions installed:
 The following Node modules are preinstalled with this image:
 - Gulp
 - Grunt CLI
-- Puppeteer
 - RequireJS (r.js)
 - Terser
 - UglifyJS
+- n (Node.js version manager - allows switching Node versions with `switch-node <version>`)
+
+**Note about Puppeteer**: Due to npm 403 errors, Puppeteer is no longer pre-installed. 
+If you need Puppeteer in your CI pipeline, install it at runtime:
+```bash
+npm install puppeteer --no-save
+```
 
 To use this image, you can specify the image tag in your  `.gitlab-ci.yml`  file. Here's an example:
 
@@ -153,5 +159,37 @@ const NOT_STABLE_XDEBUG_PHP_VERSIONS = ['7.0', '7.1', '7.2', '7.3', '7.4'];
 When adding new versions, ensure the corresponding OS release is accurate. These releases are key for the correct functioning of the CI workflows.
 
 Please note that this image is specifically tailored for GitLab CI usage and may not work as expected outside of the GitLab CI environment.
+
+## Build Optimization
+
+The build process has been optimized to:
+- Build PHP base images once and reuse them for Node.js variants
+- Use the `n` package for Node.js version management
+- Remove puppeteer from base installation (can be installed at runtime)
+- Improve build caching and reduce build times
+
+### Switching Node.js Versions
+
+Images with Node.js include the `n` version manager. You can switch Node versions at runtime:
+```bash
+# Check current version
+switch-node
+
+# Switch to a different version
+switch-node 20
+switch-node 16.20.0
+```
+
+### Building Images Locally
+
+Use the optimized build script:
+```bash
+# Build with default versions (PHP 8.4, Node 18)
+./build-optimized.sh
+
+# Build with specific versions
+./build-optimized.sh 8.3 20
+./build-optimized.sh 7.4 14
+```
 
 I hope this helps! Let me know if you have any further questions.

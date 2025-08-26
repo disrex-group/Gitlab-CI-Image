@@ -1,0 +1,45 @@
+ARG ENV_SOURCE_IMAGE
+ARG PHP_VERSION
+ARG NODE_VERSION=18
+
+# Use the pre-built PHP base image
+FROM ${ENV_SOURCE_IMAGE}:${PHP_VERSION} AS final
+USER root
+
+# Install n (Node.js version manager) and use it to install Node.js
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n -o /usr/local/bin/n \
+    && chmod +x /usr/local/bin/n \
+    && N_PREFIX=/usr/local n ${NODE_VERSION} \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Yarn
+RUN npm install -g yarn
+
+# Install global Node.js packages (excluding puppeteer due to 403 error)
+RUN npm install -g \
+    grunt-cli \
+    gulp \
+    requirejs \
+    terser \
+    uglify-js \
+    && npm cache clean --force
+
+# Copy PhantomJS if available
+COPY --from=rollupdev/phantomjs:latest /build/phantomjs/bin/phantomjs /usr/local/bin/phantomjs 2>/dev/null || true
+
+# Set up paths
+ENV PATH="${PATH}:/usr/local/lib/node_modules/bin"
+ENV NODE_PATH="/usr/local/lib/node_modules"
+
+# Create helper script to switch Node versions
+RUN echo '#!/bin/bash\nif [ -z "$1" ]; then\n  echo "Usage: switch-node <version>"\n  echo "Current Node version: $(node -v)"\n  echo "Available via n: $(n ls)"\nelse\n  n "$1"\n  echo "Switched to Node $(node -v)"\nfi' > /usr/local/bin/switch-node \
+    && chmod +x /usr/local/bin/switch-node
+
+# Note about puppeteer
+RUN echo '#!/bin/bash\necho "Puppeteer was removed from the base image due to npm 403 errors."\necho "To install puppeteer in your CI pipeline, run:"\necho "  npm install puppeteer --no-save"\necho "or add it to your project dependencies."' > /usr/local/bin/puppeteer-info \
+    && chmod +x /usr/local/bin/puppeteer-info
+
+WORKDIR /var/www/html

@@ -1,0 +1,257 @@
+name: Optimized GitLab CI Image Builder
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 1 1 * *"   # 01 AM on first day of the month
+  pull_request:
+  push:
+    paths:
+      - .trigger
+      - node/Dockerfile
+      - Dockerfile.node-optimized
+      - composer1/Dockerfile
+      - Dockerfile
+      - .github/workflows/imageci-optimized.yml
+      - .github/workflows/php-matrix/*.php
+    branches:
+      - master
+
+jobs:
+  # Generate matrices for build jobs
+  php-matrix:
+    name: Generate PHP Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.0
+      - id: matrix
+        run: |
+          php .github/workflows/php-matrix/php-generator.php >> $GITHUB_OUTPUT
+      - run: echo "Matrix:";echo '${{ steps.matrix.outputs.matrix }}'
+
+  node-versions:
+    name: Define Node Versions
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.versions.outputs.versions }}
+    steps:
+      - id: versions
+        run: |
+          # Define Node versions to build
+          echo 'versions=["14", "16", "18", "20", "21", "22"]' >> $GITHUB_OUTPUT
+
+  # Build PHP base images ONCE (without Node.js)
+  php-base:
+    needs: php-matrix
+    name: Build PHP ${{ matrix.php_version }} Base
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix: ${{fromJson(needs.php-matrix.outputs.matrix)}}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: docker/setup-qemu-action@v2
+      - uses: docker/setup-buildx-action@v2
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.10.6
+
+      - name: Login to Github Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ !env.ACT }}
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+        if: ${{ !env.ACT }}
+
+      # Build PHP base image
+      - name: Build PHP Base Image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            PHP_VERSION=${{ matrix.php_version }}
+            OS_RELEASE=${{ matrix.php_os_release }}
+            ENV_SOURCE_IMAGE=php
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php_version }}
+            docker.io/disrex/gitlab-ci:${{ matrix.php_version }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php_version }}-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php_version }}-buildcache,mode=max
+
+      # Tag latest if applicable
+      - name: Tag Latest PHP
+        if: ${{ matrix.latest }}
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            PHP_VERSION=${{ matrix.php_version }}
+            OS_RELEASE=${{ matrix.php_os_release }}
+            ENV_SOURCE_IMAGE=php
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest
+            docker.io/disrex/gitlab-ci:latest
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest-buildcache,mode=max
+
+  # Build Node.js variants using pre-built PHP base images
+  php-node-optimized:
+    needs: [php-base, php-matrix, node-versions]
+    name: PHP ${{ matrix.php_version }} + Node ${{ matrix.node_version }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      max-parallel: 10  # Limit parallel builds to avoid rate limits
+      matrix:
+        php: ${{fromJson(needs.php-matrix.outputs.matrix)}}
+        node_version: ${{fromJson(needs.node-versions.outputs.versions)}}
+        include:
+          - php_version: ${{ matrix.php.php_version }}
+            php_os_release: ${{ matrix.php.php_os_release }}
+            experimental: ${{ matrix.php.experimental }}
+            latest_php: ${{ matrix.php.latest }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: docker/setup-qemu-action@v2
+      - uses: docker/setup-buildx-action@v2
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.10.6
+
+      - name: Login to Github Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ !env.ACT }}
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+        if: ${{ !env.ACT }}
+
+      # Build Node variant using pre-built PHP base
+      - name: Build PHP + Node Image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: Dockerfile.node-optimized
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
+            PHP_VERSION=${{ matrix.php.php_version }}
+            NODE_VERSION=${{ matrix.node_version }}
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php.php_version }}-node${{ matrix.node_version }}
+            docker.io/disrex/gitlab-ci:${{ matrix.php.php_version }}-node${{ matrix.node_version }}
+          cache-from: |
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php.php_version }}
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php.php_version }}-node${{ matrix.node_version }}-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:${{ matrix.php.php_version }}-node${{ matrix.node_version }}-buildcache,mode=max
+
+      # Tag latest-nodelatest if both are latest versions
+      - name: Tag Latest PHP + Latest Node
+        if: ${{ matrix.php.latest && matrix.node_version == '21' }}
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: Dockerfile.node-optimized
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
+            PHP_VERSION=${{ matrix.php.php_version }}
+            NODE_VERSION=${{ matrix.node_version }}
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest-nodelatest
+            docker.io/disrex/gitlab-ci:latest-nodelatest
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest-nodelatest-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci:latest-nodelatest-buildcache,mode=max
+
+  # Build Composer 1 variants (reusing the PHP+Node images)
+  composer1-optimized:
+    needs: [php-node-optimized]
+    name: Composer1 - PHP ${{ matrix.php_version }} + Node ${{ matrix.node_version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        php_version: ['7.4', '8.1']
+        node_version: ['14', '18', 'x']  # x means no node
+    steps:
+      - uses: actions/checkout@v3
+      - uses: docker/setup-qemu-action@v2
+      - uses: docker/setup-buildx-action@v2
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.10.6
+
+      - name: Login to Github Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ !env.ACT }}
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+        if: ${{ !env.ACT }}
+
+      - name: Build Composer1 Image with Node
+        if: ${{ matrix.node_version != 'x' }}
+        uses: docker/build-push-action@v4
+        with:
+          context: composer1
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
+            PHP_VERSION=${{ matrix.php_version }}-node${{ matrix.node_version }}
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}
+            docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }}-node${{ matrix.node_version }}-buildcache,mode=max
+
+      - name: Build Composer1 Image without Node
+        if: ${{ matrix.node_version == 'x' }}
+        uses: docker/build-push-action@v4
+        with:
+          context: composer1
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            ENV_SOURCE_IMAGE=ghcr.io/disrex-group/gitlab-ci
+            PHP_VERSION=${{ matrix.php_version }}
+          push: ${{ github.ref == 'refs/heads/master' && !env.ACT }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }}
+            docker.io/disrex/gitlab-ci-composer1:${{ matrix.php_version }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }}-buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gitlab-ci-composer1:${{ matrix.php_version }}-buildcache,mode=max
