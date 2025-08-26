@@ -1,0 +1,146 @@
+name: Mirror Base Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_mirror:
+        description: 'Force re-mirror all images'
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Run weekly on Sunday at 1 AM UTC
+    - cron: '0 1 * * 0'
+
+env:
+  GHCR_REGISTRY: ghcr.io
+  GHCR_BASE: ghcr.io/${{ github.repository_owner }}/gitlab-ci-base-images
+
+jobs:
+  mirror-images:
+    name: Mirror Docker Hub Images to GHCR
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Setup crane
+        uses: imjasonh/setup-crane@v0.4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Mirror PHP images
+        run: |
+          echo "📦 Discovering and mirroring PHP images..."
+          
+          # Function to get OS release for PHP
+          get_php_os() {
+            local ver=$1
+            local major=${ver%%.*}
+            local minor=${ver#*.}; minor=${minor%%.*}
+            
+            if [[ "$major" == "7" ]]; then
+              [[ "$minor" -le "2" ]] && echo "buster" || echo "bullseye"
+            elif [[ "$major" == "8" ]]; then
+              [[ "$minor" == "0" ]] && echo "bullseye" || echo "bookworm"
+            else
+              echo "bookworm"
+            fi
+          }
+          
+          # Discover PHP versions from Docker Hub
+          PHP_TAGS=$(crane ls php 2>/dev/null | grep -E '^[78]\.[0-9]+-cli-(buster|bullseye|bookworm)$' || true)
+          
+          for tag in $PHP_TAGS; do
+            VERSION=$(echo $tag | sed 's/-cli-.*//')
+            OS_RELEASE=$(echo $tag | sed 's/.*-cli-//')
+            
+            # Skip very old versions
+            if [[ "$VERSION" =~ ^7\.0 ]]; then
+              continue
+            fi
+            
+            SOURCE="php:${tag}"
+            TARGET="${{ env.GHCR_BASE }}/php:${tag}"
+            
+            # Check if already mirrored
+            if crane manifest "$TARGET" >/dev/null 2>&1 && [[ "${{ inputs.force_mirror }}" != "true" ]]; then
+              echo "✓ PHP ${VERSION} (${OS_RELEASE}) already mirrored"
+            else
+              echo "🔄 Mirroring ${SOURCE} to ${TARGET}..."
+              crane copy "$SOURCE" "$TARGET" && echo "✅ Mirrored PHP ${VERSION}" || echo "❌ Failed to mirror PHP ${VERSION}"
+            fi
+          done
+
+      - name: Mirror Node images
+        run: |
+          echo "📦 Discovering and mirroring Node images..."
+          
+          # Discover Node versions from Docker Hub
+          NODE_TAGS=$(crane ls node 2>/dev/null | grep -E '^[0-9]+-(buster|bullseye|bookworm)$' || true)
+          
+          for tag in $NODE_TAGS; do
+            VERSION=$(echo $tag | sed 's/-.*//')
+            OS_RELEASE=$(echo $tag | sed 's/.*-//')
+            
+            # Skip versions older than 14
+            if [[ "$VERSION" -lt 14 ]]; then
+              continue
+            fi
+            
+            SOURCE="node:${tag}"
+            TARGET="${{ env.GHCR_BASE }}/node:${tag}"
+            
+            # Check if already mirrored
+            if crane manifest "$TARGET" >/dev/null 2>&1 && [[ "${{ inputs.force_mirror }}" != "true" ]]; then
+              echo "✓ Node ${VERSION} (${OS_RELEASE}) already mirrored"
+            else
+              echo "🔄 Mirroring ${SOURCE} to ${TARGET}..."
+              crane copy "$SOURCE" "$TARGET" && echo "✅ Mirrored Node ${VERSION}" || echo "❌ Failed to mirror Node ${VERSION}"
+            fi
+          done
+
+      - name: Mirror Composer images
+        run: |
+          echo "📦 Mirroring Composer images..."
+          
+          for VERSION in 1 2; do
+            SOURCE="composer:${VERSION}"
+            TARGET="${{ env.GHCR_BASE }}/composer:${VERSION}"
+            
+            if crane manifest "$TARGET" >/dev/null 2>&1 && [[ "${{ inputs.force_mirror }}" != "true" ]]; then
+              echo "✓ Composer ${VERSION} already mirrored"
+            else
+              echo "🔄 Mirroring ${SOURCE} to ${TARGET}..."
+              crane copy "$SOURCE" "$TARGET" && echo "✅ Mirrored Composer ${VERSION}" || echo "❌ Failed to mirror Composer ${VERSION}"
+            fi
+          done
+
+      - name: Mirror PhantomJS image
+        run: |
+          echo "📦 Mirroring PhantomJS image..."
+          
+          SOURCE="rollupdev/phantomjs:latest"
+          TARGET="${{ env.GHCR_BASE }}/phantomjs:latest"
+          
+          if crane manifest "$TARGET" >/dev/null 2>&1 && [[ "${{ inputs.force_mirror }}" != "true" ]]; then
+            echo "✓ PhantomJS already mirrored"
+          else
+            echo "🔄 Mirroring ${SOURCE} to ${TARGET}..."
+            crane copy "$SOURCE" "$TARGET" && echo "✅ Mirrored PhantomJS" || echo "❌ Failed to mirror PhantomJS"
+          fi
+
+      - name: Summary
+        run: |
+          echo "🎉 Mirror job completed!"
+          echo ""
+          echo "Mirrored images are available at:"
+          echo "  PHP: ${{ env.GHCR_BASE }}/php:*"
+          echo "  Node: ${{ env.GHCR_BASE }}/node:*"
+          echo "  Composer: ${{ env.GHCR_BASE }}/composer:*"
+          echo "  PhantomJS: ${{ env.GHCR_BASE }}/phantomjs:latest"
