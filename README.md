@@ -124,17 +124,28 @@ The CI/CD pipeline has been fully optimized for automatic version discovery and 
 - **Zero Configuration**: New PHP/Node versions are automatically detected and built
 - **Smart Caching**: Reuses base images and leverages GitHub Actions cache
 
-### 📅 Workflow Schedule
+### 📅 Workflow Schedule & Build Strategy
 
 1. **Weekly Mirror** (`mirror-base-images.yml`)
    - Runs every Sunday at 1 AM UTC
    - Discovers and mirrors new PHP/Node/Composer images from Docker Hub to GHCR
    - Avoids Docker Hub rate limits for builds
 
-2. **Daily Build** (`build-and-publish.yml`)
-   - Runs daily at 3 AM UTC
-   - Builds images using mirrored base images from GHCR
-   - Publishes to GitHub Container Registry (GHCR)
+2. **Build and Publish** (`build-and-publish.yml`)
+   - **Weekly Full Build**: Every Monday at 3 AM UTC (after mirror)
+   - **Automatic Trigger**: After mirror workflow completes
+   - **Push to Master**: Builds latest versions only
+   - **Manual Dispatch**: Three build modes available:
+     - `latest-only`: Build only the latest PHP and last 2 Node versions
+     - `full`: Build all available PHP and Node combinations
+     - `custom`: Specify exact PHP and Node versions to build
+
+### 🏗️ Build Architecture
+
+The workflow uses GitHub matrix strategy with three parallel jobs:
+- **Base Images**: PHP images without Node.js
+- **Node Variants**: PHP + Node.js combinations  
+- **Composer1 Legacy**: PHP images with Composer v1
 
 ### 🔄 How Auto-Discovery Works
 
@@ -148,14 +159,22 @@ The CI/CD pipeline has been fully optimized for automatic version discovery and 
 4. **No Manual Updates**: PHP 8.5, Node 24, etc. will be automatically added when released!
 
 
-### Building Images
+### Manual Build Trigger
 
-Images are automatically built via GitHub Actions when:
-- Code is pushed to the `master` branch
-- A pull request is created (builds minimal set for testing)
-- Scheduled monthly builds (full build of all combinations)
-- Manual workflow dispatch (can choose full or minimal build)
+You can manually trigger builds via GitHub Actions:
 
-For feature branches, builds are skipped by default to save resources. Use the "Run workflow" button in GitHub Actions to manually trigger a build if needed.
+1. Go to Actions → "Build and Publish Images"
+2. Click "Run workflow"
+3. Select build type:
+   - **latest-only**: Quick build of newest versions
+   - **full**: Build all PHP/Node combinations
+   - **custom**: Specify versions (e.g., PHP: "8.3,8.4" Node: "20,22")
+4. Click "Run workflow"
+
+The build system automatically handles:
+- Dependency ordering (base images → node variants → composer1)
+- Parallel builds within each job type
+- Multi-architecture support (amd64 + arm64)
+- Intelligent caching and layer reuse
 
 I hope this helps! Let me know if you have any further questions.

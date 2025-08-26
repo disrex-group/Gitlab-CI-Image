@@ -3,30 +3,42 @@ name: Build and Publish Images
 on:
   workflow_dispatch:
     inputs:
-      force_rebuild:
-        description: 'Force rebuild all images'
-        required: false
-        type: boolean
-        default: false
+      build_type:
+        description: 'Build type'
+        required: true
+        type: choice
+        options:
+          - latest-only
+          - full
+          - custom
+        default: latest-only
       php_versions:
-        description: 'PHP versions (comma-separated, auto-discovers if empty)'
+        description: 'PHP versions (comma-separated, only for custom build)'
         required: false
         type: string
       node_versions:
-        description: 'Node versions (comma-separated, auto-discovers if empty)'
+        description: 'Node versions (comma-separated, only for custom build)'
         required: false
         type: string
+  workflow_run:
+    workflows: ["Mirror Base Images"]
+    types: [completed]
+    branches: [master]
   schedule:
-    # Daily at 3 AM UTC (after mirror job)
-    - cron: '0 3 * * *'
+    # Weekly build on Monday at 3 AM UTC (after mirror job on Sunday)
+    - cron: '0 3 * * 1'
   push:
     branches: [master]
     paths:
       - 'Dockerfile*'
+      - 'node/Dockerfile'
+      - 'composer1/Dockerfile'
       - '.github/workflows/*.yml'
   pull_request:
     paths:
       - 'Dockerfile*'
+      - 'node/Dockerfile'
+      - 'composer1/Dockerfile'
       - '.github/workflows/*.yml'
 
 env:
@@ -35,13 +47,13 @@ env:
   TARGET_REGISTRY: ghcr.io/${{ github.repository_owner }}/gitlab-ci
 
 jobs:
-  discover-versions:
-    name: Discover Available Versions
+  prepare-matrix:
+    name: Prepare Build Matrix
     runs-on: ubuntu-latest
     outputs:
-      php_versions: ${{ steps.discover.outputs.php_versions }}
-      node_versions: ${{ steps.discover.outputs.node_versions }}
-      build_scope: ${{ steps.discover.outputs.build_scope }}
+      php_matrix: ${{ steps.matrix.outputs.php_matrix }}
+      node_matrix: ${{ steps.matrix.outputs.node_matrix }}
+      build_needed: ${{ steps.matrix.outputs.build_needed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -49,88 +61,139 @@ jobs:
       - name: Setup crane
         uses: imjasonh/setup-crane@v0.4
 
-      - name: Determine build scope
-        id: scope
+      - name: Determine build type
+        id: build_type
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "build_scope=minimal" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "schedule" ]] || \
-               [[ "${{ github.ref }}" == "refs/heads/master" ]] || \
-               [[ "${{ inputs.force_rebuild }}" == "true" ]]; then
-            echo "build_scope=full" >> $GITHUB_OUTPUT
-          else
-            echo "build_scope=minimal" >> $GITHUB_OUTPUT
+          BUILD_TYPE="latest-only"
+          
+          # Workflow dispatch with custom settings
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            BUILD_TYPE="${{ inputs.build_type }}"
+          # Weekly schedule or after mirror workflow
+          elif [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            BUILD_TYPE="full"
+          # Push to master
+          elif [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
+            BUILD_TYPE="latest-only"
+          # Pull request
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BUILD_TYPE="latest-only"
           fi
+          
+          echo "build_type=$BUILD_TYPE" >> $GITHUB_OUTPUT
+          echo "📦 Build type: $BUILD_TYPE"
 
-      - name: Discover versions
-        id: discover
+      - name: Generate build matrix
+        id: matrix
         run: |
-          BUILD_SCOPE="${{ steps.scope.outputs.build_scope }}"
-          echo "build_scope=$BUILD_SCOPE" >> $GITHUB_OUTPUT
+          BUILD_TYPE="${{ steps.build_type.outputs.build_type }}"
+          PHP_VERSIONS=""
+          NODE_VERSIONS=""
           
-          # Process PHP versions
-          if [[ -n "${{ inputs.php_versions }}" ]]; then
+          # Handle custom versions from workflow dispatch
+          if [[ "$BUILD_TYPE" == "custom" ]] && [[ -n "${{ inputs.php_versions }}" ]]; then
             PHP_VERSIONS="${{ inputs.php_versions }}"
-          else
-            echo "📦 Auto-discovering PHP versions from GHCR mirror..."
-            # Discover from our GHCR mirror (already mirrored by weekly job)
-            PHP_VERSIONS=$(crane ls ${{ env.GHCR_BASE }}/php 2>/dev/null | \
-              grep -E '^[78]\.[0-9]+-cli-(buster|bullseye|bookworm)$' | \
-              sed 's/-cli-.*//' | sort -uV | \
-              if [[ "$BUILD_SCOPE" == "minimal" ]]; then tail -1; else cat; fi | \
-              tr '\n' ',' | sed 's/,$//')
-            
-            # Fallback to Docker Hub if GHCR is empty
-            if [[ -z "$PHP_VERSIONS" ]]; then
-              echo "⚠️ GHCR mirror empty, falling back to Docker Hub..."
-              PHP_VERSIONS=$(crane ls php 2>/dev/null | \
-                grep -E '^[78]\.[0-9]+-cli-(buster|bullseye|bookworm)$' | \
-                sed 's/-cli-.*//' | sort -uV | \
-                if [[ "$BUILD_SCOPE" == "minimal" ]]; then tail -1; else cat; fi | \
-                tr '\n' ',' | sed 's/,$//')
-            fi
-          fi
-          
-          # Process Node versions
-          if [[ -n "${{ inputs.node_versions }}" ]]; then
             NODE_VERSIONS="${{ inputs.node_versions }}"
           else
-            echo "📦 Auto-discovering Node versions from GHCR mirror..."
-            # Discover from our GHCR mirror
-            NODE_VERSIONS=$(crane ls ${{ env.GHCR_BASE }}/node 2>/dev/null | \
-              grep -E '^[0-9]+-(buster|bullseye|bookworm)$' | \
-              sed 's/-.*//' | sort -n | \
-              awk '$1 >= 14' | \
-              if [[ "$BUILD_SCOPE" == "minimal" ]]; then echo "20,22"; else tr '\n' ',' | sed 's/,$//'; fi)
+            # Discover PHP versions from GHCR mirror
+            echo "📦 Discovering PHP versions from GHCR..."
+            ALL_PHP=$(crane ls ${{ env.GHCR_BASE }}/php 2>/dev/null | \
+              grep -E '^[78]\.[0-9]+-cli-(buster|bullseye|bookworm)$' | \
+              sed 's/-cli-.*//' | sort -uV || echo "")
             
             # Fallback to Docker Hub if GHCR is empty
-            if [[ -z "$NODE_VERSIONS" ]]; then
-              echo "⚠️ GHCR mirror empty, falling back to Docker Hub..."
-              NODE_VERSIONS=$(crane ls node 2>/dev/null | \
+            if [[ -z "$ALL_PHP" ]]; then
+              echo "⚠️ GHCR empty, discovering from Docker Hub..."
+              ALL_PHP=$(crane ls php 2>/dev/null | \
+                grep -E '^[78]\.[0-9]+-cli-(buster|bullseye|bookworm)$' | \
+                sed 's/-cli-.*//' | sort -uV || echo "")
+            fi
+            
+            # Discover Node versions
+            echo "📦 Discovering Node versions..."
+            ALL_NODE=$(crane ls ${{ env.GHCR_BASE }}/node 2>/dev/null | \
+              grep -E '^[0-9]+-(buster|bullseye|bookworm)$' | \
+              sed 's/-.*//' | sort -n | awk '$1 >= 14' || echo "")
+            
+            if [[ -z "$ALL_NODE" ]]; then
+              echo "⚠️ GHCR empty, discovering from Docker Hub..."
+              ALL_NODE=$(crane ls node 2>/dev/null | \
                 grep -E '^[0-9]+-(buster|bullseye|bookworm)$' | \
-                sed 's/-.*//' | sort -n | \
-                awk '$1 >= 14' | \
-                if [[ "$BUILD_SCOPE" == "minimal" ]]; then echo "20,22"; else tr '\n' ',' | sed 's/,$//'; fi)
+                sed 's/-.*//' | sort -n | awk '$1 >= 14' || echo "")
+            fi
+            
+            # Select versions based on build type
+            if [[ "$BUILD_TYPE" == "full" ]]; then
+              PHP_VERSIONS=$(echo "$ALL_PHP" | tr '\n' ',' | sed 's/,$//')
+              NODE_VERSIONS=$(echo "$ALL_NODE" | tr '\n' ',' | sed 's/,$//')
+            else  # latest-only
+              PHP_VERSIONS=$(echo "$ALL_PHP" | tail -1)
+              NODE_VERSIONS=$(echo "$ALL_NODE" | tail -2 | tr '\n' ',' | sed 's/,$//')
             fi
           fi
+          
+          # Determine OS release for each PHP version
+          get_php_os() {
+            local ver=$1
+            local major=${ver%%.*}
+            local minor=${ver#*.}; minor=${minor%%.*}
+            
+            if [[ "$major" == "7" ]]; then
+              [[ "$minor" -le "2" ]] && echo "buster" || echo "bullseye"
+            elif [[ "$major" == "8" ]]; then
+              [[ "$minor" == "0" ]] && echo "bullseye" || echo "bookworm"
+            else
+              echo "bookworm"
+            fi
+          }
+          
+          # Generate PHP matrix
+          PHP_MATRIX='{"include":['
+          FIRST=true
+          for version in ${PHP_VERSIONS//,/ }; do
+            [[ -z "$version" ]] && continue
+            os_release=$(get_php_os "$version")
+            [[ "$FIRST" == true ]] && FIRST=false || PHP_MATRIX+=','
+            PHP_MATRIX+="{\"version\":\"$version\",\"os_release\":\"$os_release\"}"
+          done
+          PHP_MATRIX+=']}'
+          
+          # Generate Node matrix
+          NODE_MATRIX='{"include":['
+          FIRST=true
+          for version in ${NODE_VERSIONS//,/ }; do
+            [[ -z "$version" ]] && continue
+            [[ "$FIRST" == true ]] && FIRST=false || NODE_MATRIX+=','
+            NODE_MATRIX+="{\"version\":\"$version\"}"
+          done
+          NODE_MATRIX+=']}'
           
           echo "PHP versions: $PHP_VERSIONS"
           echo "Node versions: $NODE_VERSIONS"
-          echo "php_versions=$PHP_VERSIONS" >> $GITHUB_OUTPUT
-          echo "node_versions=$NODE_VERSIONS" >> $GITHUB_OUTPUT
+          
+          echo "php_matrix=$PHP_MATRIX" >> $GITHUB_OUTPUT
+          echo "node_matrix=$NODE_MATRIX" >> $GITHUB_OUTPUT
+          
+          # Determine if build is needed
+          if [[ -z "$PHP_VERSIONS" ]]; then
+            echo "build_needed=false" >> $GITHUB_OUTPUT
+            echo "⚠️ No PHP versions found, skipping build"
+          else
+            echo "build_needed=true" >> $GITHUB_OUTPUT
+            echo "✅ Build will proceed with PHP: $PHP_VERSIONS and Node: $NODE_VERSIONS"
+          fi
 
-  build-images:
-    name: Build PHP ${{ matrix.php }}
-    needs: discover-versions
-    if: needs.discover-versions.outputs.php_versions != ''
+  build-base-images:
+    name: Build Base PHP ${{ matrix.version }}
+    needs: prepare-matrix
+    if: needs.prepare-matrix.outputs.build_needed == 'true'
     runs-on: ubuntu-latest
     permissions:
       packages: write
       contents: read
     strategy:
       fail-fast: false
-      matrix:
-        php: ${{ fromJson(format('[{0}]', needs.discover-versions.outputs.php_versions)) }}
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.php_matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -148,90 +211,132 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-
-      - name: Determine OS release
-        id: os
-        run: |
-          version="${{ matrix.php }}"
-          major=${version%%.*}
-          minor=${version#*.}; minor=${minor%%.*}
-          
-          if [[ "$major" == "7" ]]; then
-            [[ "$minor" -le "2" ]] && os="buster" || os="bullseye"
-          elif [[ "$major" == "8" ]]; then
-            [[ "$minor" == "0" ]] && os="bullseye" || os="bookworm"
-          else
-            os="bookworm"
-          fi
-          echo "release=$os" >> $GITHUB_OUTPUT
-
       - name: Check if latest version
         id: latest
         run: |
-          ALL_VERSIONS="${{ needs.discover-versions.outputs.php_versions }}"
-          LATEST=$(echo "$ALL_VERSIONS" | tr ',' '\n' | sort -V | tail -1)
-          [[ "${{ matrix.php }}" == "$LATEST" ]] && echo "is_latest=true" >> $GITHUB_OUTPUT || echo "is_latest=false" >> $GITHUB_OUTPUT
+          ALL_VERSIONS='${{ toJson(needs.prepare-matrix.outputs.php_matrix) }}'
+          LATEST=$(echo "$ALL_VERSIONS" | jq -r '.include[].version' | sort -V | tail -1)
+          [[ "${{ matrix.version }}" == "$LATEST" ]] && echo "is_latest=true" >> $GITHUB_OUTPUT || echo "is_latest=false" >> $GITHUB_OUTPUT
 
-      - name: Build PHP base image
+      - name: Build and push PHP base image
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           build-args: |
-            PHP_VERSION=${{ matrix.php }}
-            OS_RELEASE=${{ steps.os.outputs.release }}
+            PHP_VERSION=${{ matrix.version }}
+            OS_RELEASE=${{ matrix.os_release }}
             REGISTRY_BASE=${{ env.GHCR_BASE }}
           tags: |
-            ${{ env.TARGET_REGISTRY }}:${{ matrix.php }}
+            ${{ env.TARGET_REGISTRY }}:${{ matrix.version }}
             ${{ steps.latest.outputs.is_latest == 'true' && format('{0}:latest', env.TARGET_REGISTRY) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build Node variants
-        if: needs.discover-versions.outputs.build_scope == 'full'
-        run: |
-          NODE_VERSIONS="${{ needs.discover-versions.outputs.node_versions }}"
-          IFS=',' read -ra NODE_ARRAY <<< "$NODE_VERSIONS"
-          
-          for node_version in "${NODE_ARRAY[@]}"; do
-            echo "🔨 Building PHP ${{ matrix.php }} + Node $node_version..."
-            
-            # Determine Node OS release
-            if [[ "$node_version" -le 15 ]]; then
-              NODE_OS="buster"
-            elif [[ "$node_version" -le 19 ]]; then
-              NODE_OS="bullseye"
-            else
-              NODE_OS="bookworm"
-            fi
-            
-            # Check if this is the latest Node version
-            LATEST_NODE=$(echo "$NODE_VERSIONS" | tr ',' '\n' | sort -n | tail -1)
-            IS_LATEST_NODE=$([[ "$node_version" == "$LATEST_NODE" ]] && echo "true" || echo "false")
-            
-            # Build tags
-            TAGS="--tag ${{ env.TARGET_REGISTRY }}:${{ matrix.php }}-node$node_version"
-            
-            # Add latest-nodelatest tag if both are latest
-            if [[ "${{ steps.latest.outputs.is_latest }}" == "true" && "$IS_LATEST_NODE" == "true" ]]; then
-              TAGS="$TAGS --tag ${{ env.TARGET_REGISTRY }}:latest-nodelatest"
-            fi
-            
-            docker buildx build \
-              --platform linux/amd64,linux/arm64 \
-              --push=${{ github.event_name != 'pull_request' }} \
-              --file node/Dockerfile \
-              --build-arg ENV_SOURCE_IMAGE=${{ env.TARGET_REGISTRY }} \
-              --build-arg PHP_VERSION=${{ matrix.php }} \
-              --build-arg NODE_VERSION=$node_version \
-              --build-arg REGISTRY_BASE=${{ env.GHCR_BASE }} \
-              $TAGS \
-              .
-          done
+  build-node-images:
+    name: Build Node Variants
+    needs: [prepare-matrix, build-base-images]
+    if: needs.prepare-matrix.outputs.build_needed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ${{ fromJson(needs.prepare-matrix.outputs.php_matrix) }}
+        node: ${{ fromJson(needs.prepare-matrix.outputs.node_matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Build Composer 1 variant
-        if: needs.discover-versions.outputs.build_scope == 'full'
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if latest versions
+        id: latest
+        run: |
+          # Check if PHP is latest
+          PHP_VERSIONS='${{ toJson(needs.prepare-matrix.outputs.php_matrix) }}'
+          LATEST_PHP=$(echo "$PHP_VERSIONS" | jq -r '.include[].version' | sort -V | tail -1)
+          [[ "${{ matrix.php.version }}" == "$LATEST_PHP" ]] && PHP_LATEST=true || PHP_LATEST=false
+          
+          # Check if Node is latest
+          NODE_VERSIONS='${{ toJson(needs.prepare-matrix.outputs.node_matrix) }}'
+          LATEST_NODE=$(echo "$NODE_VERSIONS" | jq -r '.include[].version' | sort -n | tail -1)
+          [[ "${{ matrix.node.version }}" == "$LATEST_NODE" ]] && NODE_LATEST=true || NODE_LATEST=false
+          
+          # Both must be latest for the special tag
+          if [[ "$PHP_LATEST" == "true" && "$NODE_LATEST" == "true" ]]; then
+            echo "is_latest=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_latest=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push Node variant
+        uses: docker/build-push-action@v5
+        with:
+          context: node
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            ENV_SOURCE_IMAGE=${{ env.TARGET_REGISTRY }}
+            PHP_VERSION=${{ matrix.php.version }}
+            NODE_VERSION=${{ matrix.node.version }}
+            REGISTRY_BASE=${{ env.GHCR_BASE }}
+          tags: |
+            ${{ env.TARGET_REGISTRY }}:${{ matrix.php.version }}-node${{ matrix.node.version }}
+            ${{ steps.latest.outputs.is_latest == 'true' && format('{0}:latest-nodelatest', env.TARGET_REGISTRY) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-composer1-images:
+    name: Build Composer1 PHP ${{ matrix.version }}
+    needs: [prepare-matrix, build-base-images]
+    if: needs.prepare-matrix.outputs.build_needed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.php_matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if latest version
+        id: latest
+        run: |
+          ALL_VERSIONS='${{ toJson(needs.prepare-matrix.outputs.php_matrix) }}'
+          LATEST=$(echo "$ALL_VERSIONS" | jq -r '.include[].version' | sort -V | tail -1)
+          [[ "${{ matrix.version }}" == "$LATEST" ]] && echo "is_latest=true" >> $GITHUB_OUTPUT || echo "is_latest=false" >> $GITHUB_OUTPUT
+
+      - name: Build and push Composer1 variant
         uses: docker/build-push-action@v5
         with:
           context: composer1
@@ -239,10 +344,10 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           build-args: |
             ENV_SOURCE_IMAGE=${{ env.TARGET_REGISTRY }}
-            PHP_VERSION=${{ matrix.php }}
+            PHP_VERSION=${{ matrix.version }}
             REGISTRY_BASE=${{ env.GHCR_BASE }}
           tags: |
-            ${{ env.TARGET_REGISTRY }}-composer1:${{ matrix.php }}
+            ${{ env.TARGET_REGISTRY }}-composer1:${{ matrix.version }}
             ${{ steps.latest.outputs.is_latest == 'true' && format('{0}-composer1:latest', env.TARGET_REGISTRY) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
