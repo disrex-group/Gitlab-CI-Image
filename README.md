@@ -40,7 +40,6 @@ The following Node modules are preinstalled with this image:
 - RequireJS (r.js)
 - Terser
 - UglifyJS
-- n (Node.js version manager - allows switching Node versions with `switch-node <version>`)
 
 **Note about Puppeteer**: Due to npm 403 errors, Puppeteer is no longer pre-installed. 
 If you need Puppeteer in your CI pipeline, install it at runtime:
@@ -52,34 +51,29 @@ To use this image, you can specify the image tag in your  `.gitlab-ci.yml`  file
 
 ## Using this Docker Image in GitLab CI
 
-### Determining Node.js Version
+Images are published to GitHub Container Registry (GHCR). To use them in your `.gitlab-ci.yml`:
 
-If you are uncertain about the Node.js version used for generating packages:
-- **Check `package-lock.json`**: Look for the `"@types/node"` package in your `package-lock.json`. This can give you an indication of the Node.js version used.
-- **If Absent in `package-lock.json`**: Check the `.env.roll` local stack configuration for the Node.js version.
-- **Default Assumption**: If neither is present, it's likely Node.js 14 was used, as this was the only version installed in the old GitLab CI image.
-
-### Composer 2
-image: `disrex/gitlab-ci:<tag>`
-Replace  `<tag>`  with the desired version of the image. The available tags are:
-
--  `latest` : This tag includes latest PHP version without Node.js
--  `latest-nodelatest` : This tag includes latest PHP version and latest Node.js version available
--  `7.4` : This tag includes PHP 7.4 without Node.js
--  `7.4-node10` : This tag includes PHP 7.4 + Node.js version 10.x
--  `8.1-node14` : This tag includes PHP 8.1 + Node.js version 14.x
+### Composer 2 (Default)
+```yaml
+image: ghcr.io/disrex-group/gitlab-ci:<tag>
+```
 
 ### Composer 1
-image: `disrex/gitlab-ci-composer1:<tag>`
-Replace  `<tag>`  with the desired version of the image. The available tags are:
+```yaml
+image: ghcr.io/disrex-group/gitlab-ci-composer1:<tag>
+```
 
--  `latest` : This tag includes latest PHP version without Node.js
--  `latest-nodelatest` : This tag includes latest PHP version and latest Node.js version available
--  `7.4` : This tag includes PHP 7.4 without Node.js
--  `7.4-node10` : This tag includes PHP 7.4 + Node.js version 10.x
--  `8.1-node14` : This tag includes PHP 8.1 + Node.js version 14.x
+### Available Tags
 
-Choose the appropriate tag based on your project's requirements. If you're not sure which tag to use, you can start with  `latest`  as it includes the latest versions of Node.js and Composer.
+- `latest` - Latest PHP version without Node.js
+- `latest-nodelatest` - Latest PHP + latest Node.js
+- `8.4` - PHP 8.4 without Node.js
+- `8.4-node22` - PHP 8.4 + Node.js 22
+- `8.3-node20` - PHP 8.3 + Node.js 20
+- `7.4-node14` - PHP 7.4 + Node.js 14
+- And many more combinations...
+
+All PHP versions from 7.1 to 8.x and Node versions from 14+ are automatically built.
 
 In your GitLab CI pipeline, you can then run commands using the tools available in the image. For example:
 ```yaml
@@ -118,35 +112,41 @@ If you need to build specific versions, you can trigger the workflow manually:
 
 Please note that this image is specifically tailored for GitLab CI usage and may not work as expected outside of the GitLab CI environment.
 
-## Build Optimization & Auto-Discovery
+## Build Architecture & Automation
 
-The build process has been optimized to:
-- **Auto-discover new PHP/Node versions** from Docker Hub using crane
-- **Mirror base images to GHCR** to avoid Docker Hub rate limits
-- **Build PHP base images once** and reuse them for Node.js variants
-- **Smart builds** - only rebuild when new versions are detected
-- Use the `n` package for Node.js version management
-- Remove puppeteer from base installation (can be installed at runtime)
-- Improve build caching with GitHub Actions cache
+The CI/CD pipeline has been fully optimized for automatic version discovery and rate limit avoidance:
 
-### How Auto-Discovery Works
+### 🚀 Key Features
 
-1. **Daily scans** - The workflow runs daily to check Docker Hub for new PHP/Node versions
-2. **Automatic mirroring** - New base images are automatically mirrored to GHCR
-3. **Smart rebuilds** - Only builds images when new versions are detected
-4. **No manual updates** - No need to manually update version lists when PHP 8.5 or Node 24 releases!
+- **Auto-discovery**: Automatically detects new PHP/Node versions from Docker Hub using `crane`
+- **GHCR Mirroring**: All base images mirrored to GitHub Container Registry to avoid Docker Hub rate limits
+- **Multi-arch Support**: Builds for both `linux/amd64` and `linux/arm64`
+- **Zero Configuration**: New PHP/Node versions are automatically detected and built
+- **Smart Caching**: Reuses base images and leverages GitHub Actions cache
 
-### Switching Node.js Versions
+### 📅 Workflow Schedule
 
-Images with Node.js include the `n` version manager. You can switch Node versions at runtime:
-```bash
-# Check current version
-switch-node
+1. **Weekly Mirror** (`mirror-base-images.yml`)
+   - Runs every Sunday at 1 AM UTC
+   - Discovers and mirrors new PHP/Node/Composer images from Docker Hub to GHCR
+   - Avoids Docker Hub rate limits for builds
 
-# Switch to a different version
-switch-node 20
-switch-node 16.20.0
-```
+2. **Daily Build** (`build-and-publish.yml`)
+   - Runs daily at 3 AM UTC
+   - Builds images using mirrored base images from GHCR
+   - Publishes to GitHub Container Registry (GHCR)
+
+### 🔄 How Auto-Discovery Works
+
+1. **Version Detection**: Crane scans Docker Hub for PHP 7.1-8.x and Node 14+ versions
+2. **Smart OS Selection**: Automatically determines the correct base OS:
+   - PHP 7.1-7.2: Debian Buster
+   - PHP 7.3-7.4: Debian Bullseye  
+   - PHP 8.0: Debian Bullseye
+   - PHP 8.1+: Debian Bookworm
+3. **Automatic Builds**: New versions trigger builds without manual intervention
+4. **No Manual Updates**: PHP 8.5, Node 24, etc. will be automatically added when released!
+
 
 ### Building Images
 

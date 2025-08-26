@@ -1,4 +1,4 @@
-name: Build Docker Images
+name: Build and Publish Images
 
 on:
   workflow_dispatch:
@@ -33,7 +33,6 @@ env:
   GHCR_REGISTRY: ghcr.io
   GHCR_BASE: ghcr.io/${{ github.repository_owner }}/gitlab-ci-base-images
   TARGET_REGISTRY: ghcr.io/${{ github.repository_owner }}/gitlab-ci
-  DOCKER_REGISTRY: docker.io/disrex/gitlab-ci
 
 jobs:
   discover-versions:
@@ -149,12 +148,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login to Docker Hub
-        if: github.event_name != 'pull_request' && secrets.DOCKER_USERNAME != ''
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Determine OS release
         id: os
@@ -191,9 +184,7 @@ jobs:
             REGISTRY_BASE=${{ env.GHCR_BASE }}
           tags: |
             ${{ env.TARGET_REGISTRY }}:${{ matrix.php }}
-            ${{ secrets.DOCKER_USERNAME != '' && format('{0}:{1}', env.DOCKER_REGISTRY, matrix.php) || '' }}
             ${{ steps.latest.outputs.is_latest == 'true' && format('{0}:latest', env.TARGET_REGISTRY) || '' }}
-            ${{ steps.latest.outputs.is_latest == 'true' && secrets.DOCKER_USERNAME != '' && format('{0}:latest', env.DOCKER_REGISTRY) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -222,22 +213,15 @@ jobs:
             # Build tags
             TAGS="--tag ${{ env.TARGET_REGISTRY }}:${{ matrix.php }}-node$node_version"
             
-            if [[ -n "${{ secrets.DOCKER_USERNAME }}" ]]; then
-              TAGS="$TAGS --tag ${{ env.DOCKER_REGISTRY }}:${{ matrix.php }}-node$node_version"
-            fi
-            
             # Add latest-nodelatest tag if both are latest
             if [[ "${{ steps.latest.outputs.is_latest }}" == "true" && "$IS_LATEST_NODE" == "true" ]]; then
               TAGS="$TAGS --tag ${{ env.TARGET_REGISTRY }}:latest-nodelatest"
-              if [[ -n "${{ secrets.DOCKER_USERNAME }}" ]]; then
-                TAGS="$TAGS --tag ${{ env.DOCKER_REGISTRY }}:latest-nodelatest"
-              fi
             fi
             
             docker buildx build \
               --platform linux/amd64,linux/arm64 \
               --push=${{ github.event_name != 'pull_request' }} \
-              --file Dockerfile.node-optimized \
+              --file node/Dockerfile \
               --build-arg ENV_SOURCE_IMAGE=${{ env.TARGET_REGISTRY }} \
               --build-arg PHP_VERSION=${{ matrix.php }} \
               --build-arg NODE_VERSION=$node_version \
@@ -259,8 +243,6 @@ jobs:
             REGISTRY_BASE=${{ env.GHCR_BASE }}
           tags: |
             ${{ env.TARGET_REGISTRY }}-composer1:${{ matrix.php }}
-            ${{ secrets.DOCKER_USERNAME != '' && format('docker.io/disrex/gitlab-ci-composer1:{0}', matrix.php) || '' }}
             ${{ steps.latest.outputs.is_latest == 'true' && format('{0}-composer1:latest', env.TARGET_REGISTRY) || '' }}
-            ${{ steps.latest.outputs.is_latest == 'true' && secrets.DOCKER_USERNAME != '' && 'docker.io/disrex/gitlab-ci-composer1:latest' || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
