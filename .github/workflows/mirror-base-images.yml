@@ -38,8 +38,8 @@ jobs:
         run: |
           echo "📦 Discovering and mirroring PHP images..."
           
-          # Function to get OS release for PHP (7.4+ only)
-          get_php_os() {
+          # Function to determine preferred OS for PHP version
+          get_preferred_php_os() {
             local ver=$1
             local major=${ver%%.*}
             local minor=${ver#*.}; minor=${minor%%.*}
@@ -53,55 +53,105 @@ jobs:
             fi
           }
           
-          # Discover PHP versions from Docker Hub (7.4+ only, newest OS per version)
-          # Get all tags, sort to prefer bookworm > bullseye, take first per version
-          PHP_TAGS=$(crane ls php 2>/dev/null | \
+          # Get unique PHP versions from Docker Hub
+          PHP_VERSIONS=$(crane ls php 2>/dev/null | \
             grep -E '^[78]\.[0-9]+-cli-(bullseye|bookworm)$' | \
-            sort -t- -k1,1V -k3,3r | \
-            awk -F'-cli-' '!seen[$1]++ {print $1"-cli-"$2}' | \
-            grep -v '^7\.[0-3]-' || true)
+            sed 's/-cli-.*//' | sort -uV | \
+            awk '$1 >= "7.4"')
           
-          for tag in $PHP_TAGS; do
-            VERSION=$(echo $tag | sed 's/-cli-.*//')
-            OS_RELEASE=$(echo $tag | sed 's/.*-cli-//')
+          for VERSION in $PHP_VERSIONS; do
+            # Determine the preferred OS for this version
+            PREFERRED_OS=$(get_preferred_php_os "$VERSION")
             
-            SOURCE="php:${tag}"
-            TARGET="${{ env.GHCR_BASE }}/php:${tag}"
+            # Try preferred OS first, fallback to any available
+            TAG="${VERSION}-cli-${PREFERRED_OS}"
+            SOURCE="php:${TAG}"
+            
+            # Check if preferred OS exists on Docker Hub
+            if ! crane manifest "$SOURCE" >/dev/null 2>&1; then
+              # Fallback to any available OS
+              AVAILABLE_TAG=$(crane ls php 2>/dev/null | \
+                grep "^${VERSION}-cli-" | \
+                grep -E '(bullseye|bookworm)$' | \
+                head -1)
+              if [[ -n "$AVAILABLE_TAG" ]]; then
+                TAG="$AVAILABLE_TAG"
+                SOURCE="php:${TAG}"
+                echo "⚠️ PHP ${VERSION}: Using ${TAG} (preferred ${PREFERRED_OS} not found)"
+              else
+                echo "❌ PHP ${VERSION}: No suitable image found"
+                continue
+              fi
+            fi
+            
+            TARGET="${{ env.GHCR_BASE }}/php:${TAG}"
             
             # Check if already mirrored
             if crane manifest "$TARGET" >/dev/null 2>&1 && [[ "${{ inputs.force_mirror }}" != "true" ]]; then
-              echo "✓ PHP ${VERSION} (${OS_RELEASE}) already mirrored"
+              echo "✓ PHP ${VERSION} (${TAG}) already mirrored"
             else
               echo "🔄 Mirroring ${SOURCE} to ${TARGET}..."
               crane copy "$SOURCE" "$TARGET" && echo "✅ Mirrored PHP ${VERSION}" || echo "❌ Failed to mirror PHP ${VERSION}"
             fi
+            
+            # Clean up old OS variants for this version
+            echo "  Cleaning old variants for PHP ${VERSION}..."
+            crane ls ${{ env.GHCR_BASE }}/php 2>/dev/null | \
+              grep "^${VERSION}-cli-" | \
+              grep -v "^${TAG}$" | \
+              while read OLD_TAG; do
+                echo "  🗑️ Removing old variant: ${OLD_TAG}"
+                crane delete "${{ env.GHCR_BASE }}/php:${OLD_TAG}" 2>/dev/null || true
+              done
           done
 
       - name: Mirror Node images
         run: |
           echo "📦 Discovering and mirroring Node images..."
           
-          # Discover Node versions from Docker Hub (newest OS per version)
-          # Get all tags, sort to prefer bookworm > bullseye, take first per version
-          NODE_TAGS=$(crane ls node 2>/dev/null | \
+          # Get unique Node versions from Docker Hub (14+)
+          NODE_VERSIONS=$(crane ls node 2>/dev/null | \
             grep -E '^[0-9]+-(bullseye|bookworm)$' | \
-            sort -t- -k1,1n -k2,2r | \
-            awk -F'-' '$1 >= 14 && !seen[$1]++ {print $1"-"$2}' || true)
+            sed 's/-.*//' | sort -un | \
+            awk '$1 >= 14')
           
-          for tag in $NODE_TAGS; do
-            VERSION=$(echo $tag | sed 's/-.*//')
-            OS_RELEASE=$(echo $tag | sed 's/.*-//')
+          for VERSION in $NODE_VERSIONS; do
+            # Prefer bookworm for all Node versions
+            PREFERRED_OS="bookworm"
+            TAG="${VERSION}-${PREFERRED_OS}"
+            SOURCE="node:${TAG}"
             
-            SOURCE="node:${tag}"
-            TARGET="${{ env.GHCR_BASE }}/node:${tag}"
+            # Check if preferred OS exists on Docker Hub
+            if ! crane manifest "$SOURCE" >/dev/null 2>&1; then
+              # Fallback to bullseye
+              TAG="${VERSION}-bullseye"
+              SOURCE="node:${TAG}"
+              if ! crane manifest "$SOURCE" >/dev/null 2>&1; then
+                echo "❌ Node ${VERSION}: No suitable image found"
+                continue
+              fi
+              echo "⚠️ Node ${VERSION}: Using bullseye (bookworm not found)"
+            fi
+            
+            TARGET="${{ env.GHCR_BASE }}/node:${TAG}"
             
             # Check if already mirrored
             if crane manifest "$TARGET" >/dev/null 2>&1 && [[ "${{ inputs.force_mirror }}" != "true" ]]; then
-              echo "✓ Node ${VERSION} (${OS_RELEASE}) already mirrored"
+              echo "✓ Node ${VERSION} (${TAG}) already mirrored"
             else
               echo "🔄 Mirroring ${SOURCE} to ${TARGET}..."
               crane copy "$SOURCE" "$TARGET" && echo "✅ Mirrored Node ${VERSION}" || echo "❌ Failed to mirror Node ${VERSION}"
             fi
+            
+            # Clean up old OS variants for this version
+            echo "  Cleaning old variants for Node ${VERSION}..."
+            crane ls ${{ env.GHCR_BASE }}/node 2>/dev/null | \
+              grep "^${VERSION}-" | \
+              grep -v "^${TAG}$" | \
+              while read OLD_TAG; do
+                echo "  🗑️ Removing old variant: ${OLD_TAG}"
+                crane delete "${{ env.GHCR_BASE }}/node:${OLD_TAG}" 2>/dev/null || true
+              done
           done
 
       - name: Mirror Composer images
@@ -134,40 +184,71 @@ jobs:
             crane copy "$SOURCE" "$TARGET" && echo "✅ Mirrored PhantomJS" || echo "❌ Failed to mirror PhantomJS"
           fi
 
-      - name: Clean up duplicate OS variants
+      - name: Final cleanup of duplicate OS variants
         run: |
-          echo "🧹 Cleaning up duplicate OS variants..."
+          echo "🧹 Running final cleanup of duplicate OS variants..."
           
-          # For PHP images, keep only the newest OS variant per version
-          echo "Checking PHP images..."
-          crane ls ${{ env.GHCR_BASE }}/php 2>/dev/null | \
-            grep -E '^[78]\.[0-9]+-cli-(buster|bullseye|bookworm)$' | \
-            sort -t- -k1,1V -k3,3 | \
-            awk -F'-cli-' '
-              {
-                version=$1; os=$2;
-                if (version in seen && seen[version] != os) {
-                  print version"-cli-"os" (removing duplicate)"
-                  system("crane delete ${{ env.GHCR_BASE }}/php:"version"-cli-"os" 2>/dev/null || true")
-                }
-                seen[version] = os
-              }'
+          # Function to determine preferred OS for PHP version
+          get_preferred_php_os() {
+            local ver=$1
+            local major=${ver%%.*}
+            local minor=${ver#*.}; minor=${minor%%.*}
+            
+            if [[ "$major" == "7" ]]; then
+              echo "bullseye"  # 7.4 uses bullseye
+            elif [[ "$major" == "8" ]]; then
+              [[ "$minor" == "0" ]] && echo "bullseye" || echo "bookworm"
+            else
+              echo "bookworm"
+            fi
+          }
           
-          # For Node images, keep only the newest OS variant per version  
-          echo "Checking Node images..."
-          crane ls ${{ env.GHCR_BASE }}/node 2>/dev/null | \
-            grep -E '^[0-9]+-(buster|bullseye|bookworm)$' | \
-            sort -t- -k1,1n -k2,2 | \
-            awk -F'-' '
-              {
-                version=$1; os=$2;
-                if (version in seen && seen[version] != os) {
-                  print version"-"os" (removing duplicate)"
-                  system("crane delete ${{ env.GHCR_BASE }}/node:"version"-"os" 2>/dev/null || true")
-                }
-                seen[version] = os
-              }'
-      
+          # Clean up PHP duplicates
+          echo "Cleaning PHP duplicates..."
+          PHP_VERSIONS=$(crane ls ${{ env.GHCR_BASE }}/php 2>/dev/null | \
+            grep -E '^[78]\.[0-9]+-cli-(bullseye|bookworm)$' | \
+            sed 's/-cli-.*//' | sort -u)
+          
+          for VERSION in $PHP_VERSIONS; do
+            PREFERRED_OS=$(get_preferred_php_os "$VERSION")
+            PREFERRED_TAG="${VERSION}-cli-${PREFERRED_OS}"
+            
+            # Delete all variants except the preferred one
+            crane ls ${{ env.GHCR_BASE }}/php 2>/dev/null | \
+              grep "^${VERSION}-cli-" | \
+              grep -v "^${PREFERRED_TAG}$" | \
+              while read OLD_TAG; do
+                echo "  🗑️ Removing duplicate: php:${OLD_TAG}"
+                crane delete "${{ env.GHCR_BASE }}/php:${OLD_TAG}" 2>/dev/null || true
+              done
+          done
+          
+          # Clean up Node duplicates (keep only bookworm or fallback to bullseye)
+          echo "Cleaning Node duplicates..."
+          NODE_VERSIONS=$(crane ls ${{ env.GHCR_BASE }}/node 2>/dev/null | \
+            grep -E '^[0-9]+-(bullseye|bookworm)$' | \
+            sed 's/-.*//' | sort -un)
+          
+          for VERSION in $NODE_VERSIONS; do
+            # Check what's available and prefer bookworm
+            if crane manifest "${{ env.GHCR_BASE }}/node:${VERSION}-bookworm" >/dev/null 2>&1; then
+              PREFERRED_TAG="${VERSION}-bookworm"
+            else
+              PREFERRED_TAG="${VERSION}-bullseye"
+            fi
+            
+            # Delete all variants except the preferred one
+            crane ls ${{ env.GHCR_BASE }}/node 2>/dev/null | \
+              grep "^${VERSION}-" | \
+              grep -v "^${PREFERRED_TAG}$" | \
+              while read OLD_TAG; do
+                echo "  🗑️ Removing duplicate: node:${OLD_TAG}"
+                crane delete "${{ env.GHCR_BASE }}/node:${OLD_TAG}" 2>/dev/null || true
+              done
+          done
+          
+          echo "✅ Cleanup complete"
+
       - name: Summary
         run: |
           echo "🎉 Mirror job completed!"

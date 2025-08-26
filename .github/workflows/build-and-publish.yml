@@ -229,14 +229,14 @@ jobs:
             fi
           }
           
-          # Determine if we should skip existing images
-          # Skip checking if: workflow_run (after mirror) or schedule (weekly) or push to master
-          SKIP_EXISTING=false
+          # Determine if we should force rebuild all images
+          # Force rebuild ONLY if: workflow_run (after mirror) or schedule (weekly)
+          # NOT on push to master - that should only build missing images
+          FORCE_REBUILD_ALL=false
           if [[ "${{ github.event_name }}" == "workflow_run" ]] || \
-             [[ "${{ github.event_name }}" == "schedule" ]] || \
-             [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/master" ]]; then
-            SKIP_EXISTING=true
-            echo "⚠️ Force building all images due to trigger: ${{ github.event_name }}"
+             [[ "${{ github.event_name }}" == "schedule" ]]; then
+            FORCE_REBUILD_ALL=true
+            echo "⚠️ Force rebuilding all images due to trigger: ${{ github.event_name }}"
           fi
           
           # Check base images
@@ -249,7 +249,8 @@ jobs:
             os_release=$(echo "$item" | jq -r '.os_release')
             
             # Check if image exists or if force build is enabled
-            if [[ "$FORCE_BASE" == "true" ]] || [[ "$SKIP_EXISTING" == "true" ]] || ! check_image_exists "${{ env.TARGET_REGISTRY }}:$version"; then
+            # Build if: force flag set, OR auto-rebuild trigger, OR image doesn't exist
+            if [[ "$FORCE_BASE" == "true" ]] || [[ "$FORCE_REBUILD_ALL" == "true" ]] || ! check_image_exists "${{ env.TARGET_REGISTRY }}:$version"; then
               [[ "$BASE_FIRST" == true ]] && BASE_FIRST=false || BASE_BUILD_MATRIX+=','
               BASE_BUILD_MATRIX+="$item"
               echo "🔨 Will build base image: PHP $version"
@@ -272,7 +273,8 @@ jobs:
               node_version=$(echo "$node_item" | jq -r '.version')
               
               # Check if image exists or if force build is enabled
-              if [[ "$FORCE_NODE" == "true" ]] || [[ "$SKIP_EXISTING" == "true" ]] || ! check_image_exists "${{ env.TARGET_REGISTRY }}:${php_version}-node${node_version}"; then
+              # Build if: force flag set, OR auto-rebuild trigger, OR image doesn't exist
+              if [[ "$FORCE_NODE" == "true" ]] || [[ "$FORCE_REBUILD_ALL" == "true" ]] || ! check_image_exists "${{ env.TARGET_REGISTRY }}:${php_version}-node${node_version}"; then
                 [[ "$NODE_FIRST" == true ]] && NODE_FIRST=false || NODE_BUILD_MATRIX+=','
                 NODE_BUILD_MATRIX+="{\"php\":{\"version\":\"$php_version\",\"os_release\":\"$php_os\"},\"node\":{\"version\":\"$node_version\"}}"
                 echo "🔨 Will build node image: PHP $php_version + Node $node_version"
@@ -296,7 +298,8 @@ jobs:
               node_version=$(echo "$node_item" | jq -r '.version')
               
               # Check if image exists or if force build is enabled
-              if [[ "$FORCE_COMPOSER1" == "true" ]] || [[ "$SKIP_EXISTING" == "true" ]] || ! check_image_exists "${{ env.TARGET_REGISTRY }}-composer1:${php_version}-node${node_version}"; then
+              # Build if: force flag set, OR auto-rebuild trigger, OR image doesn't exist
+              if [[ "$FORCE_COMPOSER1" == "true" ]] || [[ "$FORCE_REBUILD_ALL" == "true" ]] || ! check_image_exists "${{ env.TARGET_REGISTRY }}-composer1:${php_version}-node${node_version}"; then
                 [[ "$COMPOSER1_FIRST" == true ]] && COMPOSER1_FIRST=false || COMPOSER1_BUILD_MATRIX+=','
                 COMPOSER1_BUILD_MATRIX+="{\"php\":{\"version\":\"$php_version\",\"os_release\":\"$php_os\"},\"node\":{\"version\":\"$node_version\"}}"
                 echo "🔨 Will build composer1 image: PHP $php_version + Node $node_version"
@@ -388,6 +391,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup crane
+        uses: imjasonh/setup-crane@v0.4
+
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -420,6 +426,13 @@ jobs:
           else
             echo "is_latest=false" >> $GITHUB_OUTPUT
           fi
+          
+          # Detect which OS variant exists for Node
+          if crane manifest "${{ env.GHCR_BASE }}/node:${{ matrix.node.version }}-bookworm" >/dev/null 2>&1; then
+            echo "node_os_release=bookworm" >> $GITHUB_OUTPUT
+          else
+            echo "node_os_release=bullseye" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build and push Node variant
         uses: docker/build-push-action@v5
@@ -431,6 +444,7 @@ jobs:
             ENV_SOURCE_IMAGE=${{ env.TARGET_REGISTRY }}
             PHP_VERSION=${{ matrix.php.version }}
             NODE_VERSION=${{ matrix.node.version }}
+            NODE_OS_RELEASE=${{ steps.latest.outputs.node_os_release }}
             REGISTRY_BASE=${{ env.GHCR_BASE }}
           tags: |
             ${{ env.TARGET_REGISTRY }}:${{ matrix.php.version }}-node${{ matrix.node.version }}
