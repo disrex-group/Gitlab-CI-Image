@@ -39,9 +39,6 @@ on:
     workflows: ["Mirror Base Images"]
     types: [completed]
     branches: [master]
-  schedule:
-    # Weekly build on Monday at 3 AM UTC (after mirror job on Sunday)
-    - cron: '0 3 * * 1'
   push:
     branches: [master]
     paths:
@@ -87,8 +84,8 @@ jobs:
           # Workflow dispatch with custom settings
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             BUILD_TYPE="${{ inputs.build_type }}"
-          # Weekly schedule or after mirror workflow
-          elif [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+          # After mirror workflow
+          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
             BUILD_TYPE="full"
           # Push to master
           elif [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
@@ -230,15 +227,8 @@ jobs:
             fi
           }
           
-          # Determine if we should force rebuild all images
-          # Force rebuild ONLY if: workflow_run (after mirror) or schedule (weekly)
-          # NOT on push to master - that should only build missing images
+          # No forced rebuilds - let normal discovery and existence checking handle everything
           FORCE_REBUILD_ALL=false
-          if [[ "${{ github.event_name }}" == "workflow_run" ]] || \
-             [[ "${{ github.event_name }}" == "schedule" ]]; then
-            FORCE_REBUILD_ALL=true
-            echo "⚠️ Force rebuilding all images due to trigger: ${{ github.event_name }}"
-          fi
           
           # Check base images
           BASE_BUILD_MATRIX='{"include":['
